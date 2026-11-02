@@ -1,0 +1,76 @@
+
+🧱 Core Concepts & Bean Lifecycle
+
+Q: Inversion of Control (IoC): What is Inversion of Control, and how does the Spring IoC Container implement it compared to traditional dependency management?
+
+• Answer: Traditionally, a class controls its own lifecycle and directly instantiates its dependencies using the new keyword, tightly coupling components. • Inversion of Control shifts the responsibility of object creation, configuration, and lifecycle management from the application code to an external entity—the Spring IoC container. • Spring implements this using Dependency Injection (DI). Instead of objects looking up resources, dependencies are passively injected into them via constructors, setters, or fields based on metadata (XML, annotations, or Java configuration).
+
+Q: BeanFactory vs. ApplicationContext: What are the key differences between these two container interfaces, and when would you choose one over the other?
+
+• Answer: BeanFactory provides the basic configuration framework and basic DI capabilities. It initializes beans lazily (on-demand when getBean() is called). • ApplicationContext extends BeanFactory and adds enterprise-specific functionality. It initializes beans eagerly (at startup) for all singletons. • As a Senior Developer, you should almost always choose ApplicationContext unless you are on a highly memory-constrained embedded device. ApplicationContext adds critical enterprise features: • Integrated AOP capabilities. • Message source handling for Internationalization (i18n). • Event publication framework (ApplicationEvent). • Automatic registration of BeanPostProcessor and BeanFactoryPostProcessor.
+
+Q: Bean Overview: What constitutes a Bean Definition in Spring, and how does the container translate metadata into a live object?
+
+• Answer: A bean definition is represented internally by the BeanDefinition interface. It serves as a recipe containing metadata about the bean: • The actual implementation class name. • Behavioral configuration elements (scope, lazy initialization, lifecycle callbacks). • Dependencies (references to other beans). • The container reads this metadata (via BeanDefinitionReader implementations for annotations or XML), registers it into a BeanDefinitionRegistry, and uses a BeanFactoy to instantiate, configure, and assemble the live instances using reflection when the container boots.
+
+Q: Bean Lifecycle: Can you explain the full lifecycle of a Spring Bean, specifically highlighting where InitializingBean, DisposableBean, and custom init/destroy methods execute?
+
+• Answer: The exact execution sequence is: 1. Instantiation: The container allocates memory and creates the bean instance using reflection. 2. Populate Properties: Dependencies are injected via setters or fields. 3. Aware Interfaces: If the bean implements BeanNameAware, BeanFactoryAware, or ApplicationContextAware, those methods are invoked. 4. BeanPostProcessor (Pre-Initialization): The postProcessBeforeInitialization method of any registered BPPs is executed (this is where @PostConstruct is processed). 5. Initialization: • First, the afterPropertiesSet() method from the InitializingBean interface runs. • Next, any custom init-method declared in @Bean(initMethod=...) runs. 6. BeanPostProcessor (Post-Initialization): The postProcessAfterInitialization method runs (this is where AOP proxies are created). 7. Ready for Use: The bean is alive and usable in the application. 8. Destruction (Container Shutdown): • First, methods annotated with @PreDestroy run. • Next, the destroy() method from the DisposableBean interface runs. • Finally, any custom destroy-method declared in @Bean(destroyMethod=...) runs. [Instantate] -> [Populate DI] -> [Aware Methods] -> [BPP BeforeInit] -> [init()] -> [BPP AfterInit] -> [ACTIVE]
+
+Q: Customizing Bean Nature: How do Aware interfaces allow a bean to interact directly with the framework infrastructure?
+
+• Answer: Aware interfaces are marker interfaces indicating that a bean wants to be notified of a specific framework infrastructure object. • Implementing an interface like ApplicationContextAware provides the bean with a direct reference to the ApplicationContext. • Trade-off: While powerful for low-level infrastructure tasks, it couples your business code directly to the Spring Framework API, breaking the POJO principle and making unit testing more cumbersome without mocking the container.
+
+🔗 Dependencies & Scopes
+
+Q: Dependency Injection (DI): Contrast Constructor Injection with Setter Injection. In what scenarios is Constructor Injection definitively preferred?
+
+• Answer: Constructor injection forces dependencies to be supplied at instantiation time, while Setter injection allows dependencies to be assigned or changed later via public setter methods. • Constructor injection is preferred for mandatory dependencies because: • It guarantees that the object is always initialized in a valid state (no NullPointerException on missing fields). • It allows fields to be declared as final, ensuring immutability. • It simplifies unit testing by allowing easy passing of mocks via standard Java constructors without needing a Spring context. • Setter injection should only be reserved for optional dependencies or configuration values that require sensible defaults.
+
+Q: Circular Dependencies: How does Spring handle circular dependencies between prototype scoped beans versus singleton scoped beans?
+
+• Answer: For singleton beans, Spring resolves circular dependencies using a three-level cache mechanism (singletonObjects, earlySingletonObjects, and singletonFactories). If Bean A depends on Bean B, and Bean B depends on Bean A, Spring instantiates Bean A, exposes an uninitialized raw object factory in the third-level cache, then moves to instantiate Bean B. Bean B can then inject that early reference to Bean A, resolving the loop. • For prototype beans, Spring cannot resolve circular dependencies. Because prototypes are not cached and are generated completely fresh on every request, attempting a prototype loop causes a BeanCurrentlyInCreationException. • Note: At a senior level, if constructor injection causes a circular dependency even in singletons, it will fail. It must be resolved using @Lazy or refactoring the code.
+
+Q: Bean Scopes: Explain the differences between singleton, prototype, request, and session scopes. How do you safely inject a prototype bean into a singleton bean?
+
+• Answer: • singleton: Only one instance exists per IoC container (Default). • prototype: A new instance is created every time it is requested from the container. • request / session: Scopes tied to HTTP web requests and HTTP sessions respectively. • The Problem: If you directly inject a prototype bean into a singleton bean using @Autowired, the injection happens exactly once when the singleton is created. The singleton will hold onto that same prototype instance forever, breaking its intended behavior. • The Solution: Use Lookup Method Injection via the @Lookup annotation, or implement a functional interface provider like Provider / ObjectFactory to fetch a new instance programmatically on every access.
+
+Q: Bean Definition Inheritance: What is the purpose of the parent attribute in a bean definition, and how does it differ from standard Java class inheritance?
+
+• Answer: Bean definition inheritance is purely a mechanism to share configuration metadata (such as property values, constructor arguments, or scopes) between multiple bean configurations to avoid duplication. • It is entirely separate from Java class inheritance. A child bean definition can inherit from a parent bean definition even if their underlying Java classes have absolutely no inheritance relationship. You can also define an abstract parent bean template that does not specify a class at all.
+
+🛠️ Configuration & Component Scanning
+
+Q: Annotation-based Configuration: Explain how @Autowired, @Qualifier, and @Primary work together to resolve ambiguity during dependency resolution?
+
+• Answer: Spring resolves autowired dependencies primarily by type. If multiple beans of the same type exist, an autowiring ambiguity occurs. • @Primary designates a default bean choice when multiple candidates exist. • @Qualifier provides a specific name or qualifier string to explicitly pin down the exact target bean you want, overriding @Primary. • If neither is present, Spring falls back to using the field name or parameter name as a secondary tie-breaker to match the bean name. If that fails, it throws a NoUniqueBeanDefinitionException.
+
+Q: Java-based Configuration: How does @Configuration differ from @Component when declaring a class? Explain the proxying mechanism behind inter-bean method calls in a @Configuration class.
+
+• Answer: A class annotated with @Configuration is processed using CGLIB proxying. When methods inside a @Configuration class call each other (e.g., beanA() calls beanB()), the CGLIB proxy intercepts the call and checks if beanB already exists in the container. If it does, it returns the cached singleton instance instead of invoking the method again. • If you use a plain @Component class (often called "Lite" mode), it does not use CGLIB proxying. Direct inter-bean method calls behave like regular Java methods, resulting in a completely new object instance being created every time, breaking the singleton contract.
+
+Q: Classpath Scanning: How do @ComponentScan, @Filter, and stereotype annotations work to automate bean registration?
+
+• Answer: @ComponentScan instructs Spring to scan specified packages for classes marked with stereotype annotations (@Component, @Service, @Repository, @Controller). • The framework uses an ASM-based bytecode scanner to read classes without loading them into the JVM first. • By using @Filter types (FilterType.ANNOTATION, FilterType.ASSIGNABLE_TYPE, or custom Regex), you can explicitly include or exclude specific classes from becoming beans based on architectural rules.
+
+Q: JSR-330 Standard: Which standard annotations from jakarta.inject does Spring support, and what are their Spring equivalents?
+
+• Answer: Spring supports the standardized JSR-330 annotations, providing portability across DI containers (like Guice or CDI): • @Inject maps directly to Spring's @Autowired. • @Named maps directly to Spring's @Component or @Qualifier. • @Singleton maps directly to @Scope("singleton").
+
+🚀 Extension Points & Advanced Capabilities
+
+Q: Container Extension Points: Compare the roles of a BeanPostProcessor and a BeanFactoryPostProcessor. Provide a practical use case for each.
+
+• Answer: • BeanFactoryPostProcessor (BFPP) operates on the bean configuration metadata. It executes right after all bean definitions are loaded but before any actual bean instances are created. Use case: PropertySourcesPlaceholderConfigurer, which replaces ${placeholder} values inside configuration files with actual environment properties. • BeanPostProcessor (BPP) operates on live bean instances. It executes lifecycle hooks before and after bean initialization. Use case: Creating AOP dynamic proxies, or custom validation annotations (like validating fields on custom security beans).
+
+Q: Environment Abstraction: How does the Environment interface manage Profiles and externalized PropertySources? How do you resolve properties using the @Value annotation?
+
+• Answer: The Environment abstraction acts as a unified registry for profiles and properties. • Profiles allow you to group bean configurations conditionally (e.g., @Profile("dev") vs @Profile("prod")). • PropertySources are evaluated in a strict hierarchy (e.g., Command-line arguments -> JVM System Properties -> OS Environment Variables -> application.properties). • The @Value("${property.name}") annotation utilizes a property placeholder resolver connected to this Environment to inject values dynamically at bean setup.
+
+Q: ApplicationContext Capabilities: Beyond DI, what infrastructure features does ApplicationContext provide regarding Internationalization (MessageSource), Event Publication, and Resource loading?
+
+• Answer: • Internationalization: Implements MessageSource to resolve text messages parameterized by a Locale. • Event Publication: Implements ApplicationEventPublisher to support decoupled, event-driven communication inside the JVM using @EventListener components. • Resource Loading: Implements ResourceLoader to stream configurations dynamically from various paths (e.g., classpath:, file:, url:).
+
+Q: LoadTimeWeaver: What is a LoadTimeWeaver, and why is it necessary when implementing aspect-oriented programming (AOP) or JPA tooling in Spring?
+
+• Answer: A LoadTimeWeaver (LTW) transforms Java classes dynamically at the moment they are loaded into the JVM by the ClassLoader. • It is necessary for AspectJ advanced AOP or JPA/Hibernate lazy loading tracking because it modifies the actual class bytecode before execution. This allows Spring to apply aspects to objects that are created via the new keyword outside of the Spring container's control.
