@@ -74,3 +74,28 @@ Q: ApplicationContext Capabilities: Beyond DI, what infrastructure features does
 Q: LoadTimeWeaver: What is a LoadTimeWeaver, and why is it necessary when implementing aspect-oriented programming (AOP) or JPA tooling in Spring?
 
 • Answer: A LoadTimeWeaver (LTW) transforms Java classes dynamically at the moment they are loaded into the JVM by the ClassLoader. • It is necessary for AspectJ advanced AOP or JPA/Hibernate lazy loading tracking because it modifies the actual class bytecode before execution. This allows Spring to apply aspects to objects that are created via the new keyword outside of the Spring container's control.
+
+Q: How does the Spring container handle programmatic bean registration at runtime while the context is already actively serving requests? What are the structural risks?
+
+• Answer: Spring does not officially support concurrent runtime bean registration. While you can access DefaultListableBeanFactory via getAutowireCapableBeanFactory() and call registerBeanDefinition() or registerSingleton(), doing so concurrently with active live traffic introduces major risks.
+• Structurally, it can cause ConcurrentModificationException within the container's internal registry maps, break autowiring introspection consistency, and lead to race conditions where one thread receives a half-configured instance. All bean definitions and manually supplied singleton instances must be fully registered before the container is refreshed.
+
+Q: What is the current architectural stance on Bean Definition Overriding in Spring, and how can an engineering team strictly enforce configuration clarity across large microservices?
+
+• Answer: Bean definition overriding occurs when a bean is registered with an identifier that is already allocated. Spring considers this a bad practice because it obfuscates configuration clarity, and it is slated for deprecation.
+• To strictly enforce configuration health, you can programmatically invoke setAllowBeanDefinitionOverriding(false) on the ApplicationContext before calling refresh(). In Spring Boot, this is commonly externalized by setting spring.main.allow-bean-definition-overriding=false in the environment configuration, which forces the application bootstrap to fail immediately with an exception if a duplicate bean name is encountered.
+
+Q: Explain how Java-based @Bean methods interact with Classpath Scanning when there is a component name clash. How does the proxy or factory resolution prioritize them?
+
+• Answer: If a component class is discovered via scanning (e.g., a class annotated with @Component named paymentService), but a configuration class also declares a @Bean method named paymentService() returning a matching type, the @Bean factory method silently overrides the scanned class.
+• The container ignores the constructor of the scanned class and instead invokes the @Bean factory method to instantiate the bean, allowing developers an explicit escape hatch to override implicit scanning behavior when needed.
+
+Q: Describe Spring's underlying bean naming strategy for unnamed components. What is the specific naming exception dictated by java.beans.Introspector.decapitalize?
+
+• Answer: By default, Spring converts the simple class name to camelCase by turning the first character to lowercase (e.g., OrderService becomes orderService).
+• However, following the rules of java.beans.Introspector.decapitalize, if both the first and second characters of the class name are uppercase, the original uppercase casing is fully preserved. For example, a class named COBProcessor or RESTClient will yield the bean names COBProcessor and RESTClient instead of cOBProcessor or rESTClient.
+
+Q: Why is external aliasing structurally important when integrating multiple detached application subsystems or libraries that share a single backend dependency (like a database)?
+
+• Answer: Large application structures are frequently split into isolated subsystems, each designed with its own localized bean dependencies (e.g., Subsystem A expects subsystemA-dataSource while Subsystem B expects subsystemB-dataSource).
+• External aliasing decouples the shared platform component from the rigid naming expectations of individual modules. By defining aliases pointing to a single root bean instance, you create unique localized namespaces that guarantee no component naming clashes, while simultaneously satisfying the dependencies of all subsystems without creating redundant duplicate objects.
