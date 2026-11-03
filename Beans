@@ -1,0 +1,152 @@
+production-ready Java code examples demonstrating the advanced bean management nuances discussed above.
+
+1. Enforcing Strict Configuration (Disabling Bean Overriding)
+
+In modern Spring Boot apps, you can control this via application.properties with spring.main.allow-bean-definition-overriding=false. However, if you are configuring a core Spring context programmatically (such as in a standalone application or integration test setup), you must modify the flag before the context is refreshed.
+java
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+public class StrictContextBootstrap {
+
+    public static void main(String[] args) {
+        // 1. Instantiate the context without registering classes immediately
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        
+        // 2. Explicitly disable bean definition overriding
+        context.setAllowBeanDefinitionOverriding(false);
+        
+        // 3. Register configuration sources
+        context.register(PrimaryConfig.class, DuplicateConfig.class);
+        
+        try {
+            // 4. Refreshing will now throw an exception instead of silently overriding
+            context.refresh();
+        } catch (Exception e) {
+            System.err.println("Context bootstrap failed as expected: " + e.getMessage());
+            // Throws: BeanDefinitionOverrideException
+        } finally {
+            context.close();
+        }
+    }
+}
+
+@Configuration
+class PrimaryConfig {
+    @Bean
+    public String paymentGateway() { return "Stripe"; }
+}
+
+@Configuration
+class DuplicateConfig {
+    @Bean
+    public String paymentGateway() { return "PayPal"; } // Conflicting bean ID
+}
+Use code with caution.
+
+2. Java @Bean Method Overriding a Scanned @Component
+
+This example demonstrates how a Java configuration method silently overrides a component discovered via classpath scanning, provided their names match.
+java
+import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+// --- File: OrderProcessor.java ---
+@Component("processor") // Scanned bean with explicit name "processor"
+public class OrderProcessor {
+    public String execute() {
+        return "Executed by implicit Classpath Component Scanner";
+    }
+}
+
+// --- File: OverrideConfig.java ---
+@Configuration
+public class OverrideConfig {
+
+    // Same bean name ("processor") matching the scanned class return type
+    @Bean("processor")
+    public OrderProcessor customProcessor() {
+        return new OrderProcessor() {
+            @Override
+            public String execute() {
+                // The container will invoke this factory method instead of the constructor
+                return "Executed by explicit @Bean override factory method";
+            }
+        };
+    }
+}
+Use code with caution.
+
+3. Demonstrating the Introspector.decapitalize Naming Exception
+
+This snippet demonstrates how Spring names beans implicitly via component scanning, highlighting the uppercase edge case.
+java
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
+
+@Configuration
+@ComponentScan(basePackageClasses = NamingDemo.class)
+public class NamingDemo {
+
+    public static void main(String[] args) {
+        var context = new AnnotationConfigApplicationContext(NamingDemo.class);
+
+        // Standard Decapitalization: "StandardService" -> "standardService"
+        System.out.println("Contains 'standardService': " + context.containsBean("standardService")); // true
+
+        // Acronym Casing Exception: "RESTClient" -> "RESTClient" (Unchanged!)
+        System.out.println("Contains 'restClient': " + context.containsBean("restClient")); // false
+        System.out.println("Contains 'RESTClient': " + context.containsBean("RESTClient")); // true
+
+        context.close();
+    }
+}
+
+@Component
+class StandardService {}
+
+@Component
+class RESTClient {} // First and second characters are capitalized
+Use code with caution.
+
+4. Setting Up Multi-Namespace Aliasing (Java Config)
+
+When building decoupled architecture, you can use aliases inside the @Bean annotation so that independent subsystems can look up a centralized component using their own legacy naming requirements.
+java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import javax.sql.DataSource;
+import com.zaxxer.hikari.HikariDataSource;
+
+@Configuration
+public class DataSourceNamespaceConfig {
+
+    // Defines a primary bean name and a set of functional aliases
+    @Bean(name = {"coreDataSource", "subsystemA-dataSource", "subsystemB-dataSource"})
+    public DataSource mainDataSource() {
+        return new HikariDataSource(); 
+    }
+}
+
+// Subsystem A looks up the bean using its localized alias string
+@Component
+class SubsystemAController {
+    @Autowired
+    @Qualifier("subsystemA-dataSource")
+    private DataSource dataSource;
+}
+
+// Subsystem B looks up the exact same instance using its specific identifier
+@Component
+class SubsystemBController {
+    @Autowired
+    @Qualifier("subsystemB-dataSource")
+    private DataSource dataSource;
+}
+Use code with caution.
