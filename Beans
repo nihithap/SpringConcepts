@@ -150,3 +150,83 @@ class SubsystemBController {
     private DataSource dataSource;
 }
 Use code with caution.
+
+
+Bean Scopes:
+
+• Core Bean Scopes:
+	• singleton: (Default) The container creates exactly one shared instance per IoC container. This instance is stored in a cache, and all concurrent requests for that bean receive the same object reference.
+	• prototype: A completely new bean instance is created every single time it is requested or injected. The container instantiates and configures it, but does not manage its lifecycle callbacks beyond initialization.
+• The depends-on Attribute: Typically, bean dependency ordering is handled implicitly via constructor or setter injection references. However, the depends-on attribute explicitly forces the container to initialize one or more specified beans before the current bean is instantiated.
+• Use Cases for depends-on: It is primarily utilized for implicit or side-effect-driven dependencies where direct object references do not exist (e.g., executing a database initialization script, registering a static driver, or populating system properties before a connection pool starts up).
+• Destruction Ordering: When the container shuts down, beans specified via depends-on are destroyed after the dependent bean, ensuring infrastructure beans remain alive while components are tearing down.
+
+🧠 Senior-Level Questions & Answers
+
+
+Q: Because singleton is the default scope, how must a senior engineer design their bean classes to guarantee thread safety under heavy concurrent production traffic?
+
+• Answer: Since a single bean instance handles requests across all application threads simultaneously, the class must be designed to be completely stateless. It should not maintain mutable instance variables or fields that store user-specific state.
+• Any state required during an execution thread should be kept localized entirely within method parameters, local method variables, or thread-safe components (like ThreadLocal or concurrent collections). Fields should ideally be limited to immutable, read-only references to other collaborating beans.
+
+Q: What memory and resource management responsibilities fall on the developer when utilizing the prototype scope, specifically concerning bean destruction?
+
+• Answer: While Spring executes all configuration, dependency injection, and standard initialization callbacks (like InitializingBean or @PostConstruct) for prototype beans, it completely relinquishes control of the instance once it is handed off.
+• The container does not track or invoke destruction lifecycle callbacks (like DisposableBean or @PreDestroy) for prototypes. To prevent memory or resource leaks (such as unclosed database connections or open file handles), the developer must manually clean up the bean, or utilize a custom BeanPostProcessor that tracks prototype lifecycles for destruction.
+
+Q: Contrast standard dependency injection with the depends-on mechanism. Why can't you simply use a standard constructor or setter injection reference to achieve the same ordering?
+
+• Answer: Standard dependency injection implies a direct code interaction—Bean A has a field reference to Bean B. However, depends-on is designed for implicit or environmental decoupling.
+• For example, if Bean A relies on a database table existing, and Bean B is a script executor that creates that table upon startup, Bean A does not need to call any method on Bean B directly. Using direct injection here would introduce an unneeded, artificial code coupling simply to enforce startup sequencing. depends-on forces the container to complete Bean B's initialization sequence first without creating an explicit class-level code dependency.
+
+💻 Practical Coding Translation: XML to Modern Java Config
+
+
+Legacy XML Approach:
+
+xml
+<beans>
+    <!-- Infrastructure bean that sets up global settings or prepares an external resource -->
+    <bean id="systemInitializer" class="com.example.SystemInitializer" init-method="bootstrap"/>
+
+    <!-- A prototype service bean -->
+    <bean id="reportTask" class="com.example.ReportTask" scope="prototype"/>
+
+    <!-- Singleton bean forced to wait for the initializer to complete first -->
+    <bean id="connectionPool" class="com.example.ConnectionPool" scope="singleton" depends-on="systemInitializer"/>
+</beans>
+Use code with caution.
+
+Modern Java Configuration Equivalent:
+
+In modern Spring apps, scopes are explicitly defined using @Scope annotations, and explicit ordering dependencies use @DependsOn.
+java
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.context.annotation.Scope;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+
+@Configuration
+public class ScopeAndOrderingConfig {
+
+    @Bean(initMethod = "bootstrap")
+    public SystemInitializer systemInitializer() {
+        return new SystemInitializer();
+    }
+
+    // 1. Prototype Scope configuration via annotation
+    @Bean
+    @Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
+    public ReportTask reportTask() {
+        return new ReportTask();
+    }
+
+    // 2. Enforcing initialization sequence via @DependsOn
+    @Bean
+    @DependsOn("systemInitializer")
+    @Scope(ConfigurableBeanFactory.SCOPE_SINGLETON) // Explicit singleton (can be omitted as it's default)
+    public ConnectionPool connectionPool() {
+        return new ConnectionPool();
+    }
+}
