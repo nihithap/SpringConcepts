@@ -230,3 +230,44 @@ public class ScopeAndOrderingConfig {
         return new ConnectionPool();
     }
 }
+
+
+
+📝 Short Notes: Bean Initialization Deadlock
+
+• Definition: A permanent hang during Spring container startup when multiple threads try to initialize or fetch singleton beans simultaneously.
+• Core Mechanism: Spring uses standard synchronization (synchronized blocks) inside DefaultSingletonBeanRegistry to ensure singletons are created exactly once. Deadlocks happen when Thread A holds the lock for Bean 1 and waits for Thread B, while Thread B tries to fetch/create Bean 2 (or Bean 1) and gets blocked by Spring's registry lock.
+• Primary Triggers:
+	• Spawning background tasks (@Async, ExecutorService) inside constructors or @PostConstruct that call applicationContext.getBean().
+	• Circular dependencies mixed with asynchronous execution or lazy proxies.
+	• Race conditions in container startup caused by external web servers (like IBM Liberty) making early requests before context initialization finishes.
+• Quick Fixes: Defer background execution using ContextRefreshedEvent or CommandLineRunner, strictly avoid manual .getBean() calls during startup, and use constructor injection.
+
+🧠 Scenario-Based Questions
+
+
+Scenario 1: The Asynchronous Cache Loader
+
+Question: A developer wants to speed up application startup. In a configuration bean, they add a @PostConstruct method that uses a custom ExecutorService to spin up 5 threads. Each thread calls applicationContext.getBean(DatabaseService.class) to fetch data and pre-populate a cache. During startup, the application randomly freezes completely without throwing any exceptions.
+• Why did this happen?
+• How do you fix it?
+💡 View Answer & Explanation
+• Why it happened: The main startup thread holds the singleton registry lock to initialize the configuration bean. The background threads try to fetch DatabaseService, which requires acquiring the same singleton registry lock. The main thread is waiting for the ExecutorService tasks to complete, while the background threads are blocked waiting for the main thread to release the lock—creating a classic deadlock.
+• The Fix: Remove the multi-threaded logic from @PostConstruct. Instead, move the cache-population task to an @EventListener(ContextRefreshedEvent.class) method. This ensures all beans are fully initialized and the registry locks are completely released before the background threads are spawned.
+
+Scenario 2: The Eager Third-Party Component
+
+Question: Your application is deployed on a enterprise application server (like IBM WebSphere/Liberty). During startup, the server environment triggers early health check requests or initializes an early servlet filter that calls into a Spring-managed security bean. The application intermittently hangs on boot. A thread dump reveals one thread stuck in DefaultSingletonBeanRegistry.getSingleton() and another stuck waiting on container initialization. How do you resolve this without changing the server platform?
+💡 View Answer & Explanation
+• Why it happened: The application server invokes a component on a parallel thread before Spring has finished its serial startup sequence. This parallel thread attempts to lazily trigger bean creation while the main Spring bootstrap thread is halfway through the registry process, causing a thread collision and deadlock.
+• The Fix:
+	1. For modern Spring versions (Spring 6.2+ / Boot 3.4+), explicitly set the system property spring.locking.strict=true to force strict, serialized locking.
+	2. Mark the entry-point beans or controllers targeted by the early health checks with @Lazy to safely defer their initialization until the container structure is stable.
+
+Scenario 3: The @Async Interceptor Trap
+
+Question: Bean A has a @PostConstruct block that invokes a method in Bean B. The method in Bean B is marked with @Async. When starting the application, it hangs indefinitely. If you remove the @Async annotation, the application starts up instantly and perfectly. What is causing the deadlock?
+💡 View Answer & Explanation
+• Why it happened: When a method is marked with @Async, Spring doesn't just call it; it creates a proxy or routes it through a task executor thread. The main thread is locked initializing Bean A. The async thread tries to execute Bean B's method, but because the context initialization loop is still technically handling the cascading dependency resolution of Bean A/B, the async thread gets trapped waiting for the main thread's startup lock to clear.
+• The Fix: Avoid mixing asynchronous cross-bean calls inside lifecycle methods (@PostConstruct or afterPropertiesSet). Refactor the design so that Bean A triggers Bean B's async method via a startup runner (CommandLineRunner) after the application context is completely refreshed.
+
