@@ -118,3 +118,73 @@ class NotificationManager {
         fallbackChannel.send(alertText);
     }
 }
+
+-------------------
+The CustomAutowireConfigurer documentation explains how to register your own custom annotations as valid Spring dependency qualifiers, even if they don't use Spring's native @Qualifier annotation. [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=CustomAutowireConfigurer%20is%20a%20BeanFactoryPostProcessor%20that,annotated%20with%20Spring's%20@Qualifier%20annotation.)
+
+The Problem it Solves
+
+Normally, if you want to create a custom qualifier annotation to tag your beans, Spring requires you to put its own @Qualifier annotation inside your custom definition:
+java
+@Qualifier // <-- Spring forces you to include this
+public @interface MyCustomTag { }
+Use code with caution.
+However, if you are working in a highly decoupled architecture—such as an enterprise system where you want your custom annotations to remain completely independent of the Spring Framework (no Spring imports in your domain logic)—Spring won't recognize your custom annotations during autowiring.
+
+The Solution: CustomAutowireConfigurer
+
+CustomAutowireConfigurer is a special utility class (technically a BeanFactoryPostProcessor) that tells Spring: "Hey, keep an eye out for this specific custom annotation, and treat it exactly like a @Qualifier." [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=CustomAutowireConfigurer%20is%20a%20BeanFactoryPostProcessor%20that,own%20custom%20qualifier%20annotation%20types%2C)
+
+How to use it:
+
+Step 1: Create a plain annotation (No Spring dependencies)
+java
+package com.example;
+
+import java.lang.annotation.*;
+
+@Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Offline {
+    // Note: No Spring @Qualifier annotation here!
+}
+Use code with caution.
+Step 2: Register it via Configuration
+You use CustomAutowireConfigurer to register the fully qualified class name of your annotation into Spring's lookup system: [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=CustomAutowireConfigurer%20is%20a%20BeanFactoryPostProcessor%20that,to%20use%20CustomAutowireConfigurer%20:%20example.CustomQualifier)
+java
+@Configuration
+public class AutowireConfig {
+
+    @Bean
+    public static CustomAutowireConfigurer customAutowireConfigurer() {
+        CustomAutowireConfigurer configurer = new CustomAutowireConfigurer();
+        
+        Set<String> customTypes = new HashSet<>();
+        customTypes.add("com.example.Offline"); // Register your class
+        
+        configurer.setCustomQualifierTypes(customTypes);
+        return configurer;
+    }
+}
+Use code with caution.
+Step 3: Annotate and Inject cleanly
+Now Spring recognizes your annotation seamlessly:
+java
+@Component
+@Offline // Spring treats this as a valid qualifier!
+public class BackupCatalog implements MovieCatalog { ... }
+
+@Component
+public class MovieRecommender {
+    @Autowired
+    @Offline // Properly filters out any non-offline catalogs!
+    private MovieCatalog offlineCatalog;
+}
+Use code with caution.
+
+What happens under the hood?
+
+The page mentions the AutowireCandidateResolver. This is the component inside Spring that scans candidates when you call @Autowired. Because you used the configurer, the resolver now looks for three main things to determine a match: [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=The%20AutowireCandidateResolver%20determines%20autowire%20candidates,annotations%20registered%20with%20the%20CustomAutowireConfigurer)
+1. The explicit settings on the bean metadata (autowire-candidate="true/false").
+2. Standard @Qualifier annotations.
+3. Any custom annotations that you registered via CustomAutowireConfigurer. [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=The%20autowire%2Dcandidate%20value%20of%20each,element%20%2D%20The%20presence%20of), [2] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=The%20presence%20of%20@Qualifier%20annotations,annotations%20registered%20with%20the%20CustomAutowireConfigurer)
