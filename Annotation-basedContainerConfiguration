@@ -284,3 +284,170 @@ Use code with caution.
 A key detail mentioned in earlier parts of the documentation context is that @Resource is structurally more limited than @Autowired:
 • Supported targets: @Resource can only be placed directly on fields or single-argument setter methods.
 • Unsupported targets: You cannot use @Resource on class constructors or on methods that require multiple parameters. If you need constructor injection, you must stick with @Autowired.
+
+---------------------------
+The documentation explains how to use the Jakarta EE standard annotations @PostConstruct and @PreDestroy to hook into a Spring bean's lifecycle.
+These annotations allow you to trigger custom code automatically right after a bean is fully initialized, or right before it is destroyed by the application container.
+
+1. @PostConstruct (The Setup Hook)
+
+When Spring creates a bean, it runs the constructor and then injects all requested dependencies (via @Autowired, @Value, etc.).
+If you try to run initialization logic inside the class constructor that relies on those dependencies, you will get a NullPointerException because Spring hasn't injected them yet. @PostConstruct solves this by executing immediately after dependency injection is complete.
+
+Common Use Cases:
+
+• Pre-loading or seeding data into a cache.
+• Establishing connection pools or initializing third-party libraries.
+• Validating that crucial properties were correctly loaded via @Value. [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/postconstruct-and-predestroy-annotations.html#:~:text=%2C%20the%20cache%20is%20pre%2Dpopulated,initialization%20and%20cleared%20upon%20destruction)
+java
+@Component
+public class DatabaseManager {
+
+    @Autowired
+    private DataSource dataSource; // Spring injects this first
+
+    @PostConstruct
+    public void init() {
+        // Runs automatically AFTER dataSource is completely ready
+        System.out.println("Connecting to database and verifying schema...");
+    }
+}
+Use code with caution.
+
+2. @PreDestroy (The Cleanup Hook)
+
+When your application is closing down, Spring destroys all active beans. @PreDestroy lets you execute logic immediately before the bean is removed from memory.
+
+Common Use Cases:
+
+• Gracefully closing open database connections or file streams.
+• Saving unsaved session states or flushing an in-memory queue to disk.
+• Safely shutting down background thread pools.
+java
+@Component
+public class DatabaseManager {
+
+    @PreDestroy
+    public void cleanup() {
+        // Runs automatically right before the application shuts down
+        System.out.println("Closing all active database connections safely...");
+    }
+}
+----------------------
+The documentation explains Classpath Scanning, which is Spring’s mechanism for automatically discovering your classes and registering them as beans in the application container, eliminating the need to declare them one by one in XML or configuration files.
+
+1. Stereotype Annotations (The Markers)
+
+To make a Java class eligible for automatic discovery, you label it with a stereotype annotation. Spring provides four main tiers:
+• @Component: The generic, root stereotype annotation for any Spring-managed class.
+• @Service: A specialization of @Component meant for business logic.
+• @Repository: Built for data persistence (DAOs). It also automatically translates database-specific errors into Spring's data exception hierarchy.
+• @Controller: Reserved for handling presentation and web requests (like Spring MVC).
+
+2. Turning Scanning On: @ComponentScan
+
+Simply adding annotations to your classes isn't enough; you must explicitly tell Spring where to look. You activate this by placing @ComponentScan on a configuration class:
+java
+@Configuration
+@ComponentScan(basePackages = "com.example.myapp") // Scopes the search
+public class AppConfig { }
+Use code with caution.
+Spring will scan the specified package and all of its sub-packages. It looks for the stereotype annotations, generates a BeanDefinition for each class it finds, and registers them into the container automatically.
+
+3. Advanced Filtering Rules
+
+By default, @ComponentScan only looks for the main stereotype annotations. However, you can use includeFilters and excludeFilters to customize this behavior completely:
+java
+@Configuration
+@ComponentScan(
+    basePackages = "org.example",
+    includeFilters = @Filter(type = FilterType.REGEX, pattern = ".*Stub.*Repository"), // Include matching regex
+    excludeFilters = @Filter(Repository.class) // Block standard repositories
+)
+public class AppConfig { }
+Use code with caution.
+Spring offers 5 filter types to fine-tune your scanning patterns:
+1. annotation: (Default) Filters based on the presence of a specific class-level annotation.
+2. assignable: Filters based on whether a class extends a specific base class or implements a specific interface.
+3. aspectj: Matches targets using complex AspectJ type expressions.
+4. regex: Matches against fully qualified class names using standard Regular Expressions.
+5. custom: Allows you to plug in a programmatic filter by implementing Spring's TypeFilter interface.
+
+4. Automatic Bean Naming
+
+When Spring registers an autodetected component, it has to assign it a bean name:
+• Custom Names: If you supply a string argument to the stereotype—like @Service("myLister")—Spring uses that name.
+• Default Names: If unnamed, Spring defaults to the class name but lowercases the first letter (e.g., MovieFinderImpl becomes movieFinderImpl).
+• Handling Name Collisions: If two different packages contain classes with identical names (e.g., com.packageA.Service and com.packageB.Service), you can override the default naming strategy by passing FullyQualifiedAnnotationBeanNameGenerator.class into your @ComponentScan parameters to make bean IDs unique.
+
+5. Defining @Bean Inside a @Component
+
+A fascinating design detail highlighted in the text is that plain @Component classes can also house @Bean factory methods. However, they behave completely differently than @Bean methods inside a @Configuration class:
+• In a @Configuration class (Full Mode): Spring uses CGLIB proxying to intercept cross-method calls. If method A calls method B, Spring intercepts it to return the exact same scoped bean instance instead of executing the Java method again.
+• In a @Component class (Lite Mode): No CGLIB proxying occurs. If you programmatically call another @Bean method within the same @Component, it executes with standard Java semantics and will create a completely new, independent instance right then and there.
+--------------------------
+JSR-330 is the official Java standard specification for Dependency Injection. Starting with Spring 3.0, Spring built native support for these standard annotations. [1] (https://docs.spring.io/spring-framework/docs/5.3.13/reference/html/core.html), [2] (https://www.spring-certification.com/post/understanding-dependency-injection-annotations-in-spring), [3] (https://jcp.org/en/jsr/detail?id=330), [4] (https://mkyong.com/spring3/spring-3-and-jsr-330-inject-and-named-example/)
+They live inside the jakarta.inject package (historically javax.inject in older versions of Java). They allow you to write framework-agnostic code. If you use JSR-330 annotations, your classes can theoretically be migrated from Spring to other DI containers (like Google Guice or Quarkus) without changing your Java source imports. [1] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html), [2] (https://www.youtube.com/watch?v=3flORdmpxhk), [3] (https://mkyong.com/spring3/spring-3-and-jsr-330-inject-and-named-example/), [4] (https://www.spring-certification.com/post/understanding-dependency-injection-annotations-in-spring)
+
+1. @Inject (The Standard Alternative to @Autowired)
+
+The @Inject annotation performs type-based dependency injection exactly like Spring's @Autowired. It can be placed on fields, constructors, or methods. [1] (https://juliuskrah.com/blog/2016/12/10/introduction-to-spring-and-dependency-injection-jsr-330/), [2] (https://www.spring-certification.com/post/understanding-dependency-injection-annotations-in-spring)
+java
+import jakarta.inject.Inject;
+
+public class MovieRecommender {
+
+    private final MovieCatalog movieCatalog;
+
+    @Inject // <-- Replaces Spring's @Autowired
+    public MovieRecommender(MovieCatalog movieCatalog) {
+        this.movieCatalog = movieCatalog;
+    }
+}
+Use code with caution.
+
+Key Differences from @Autowired:
+
+• No required attribute: @Autowired(required = false) allows optional dependencies. @Inject lacks a built-in required parameter.
+• Handling optional values: If you need a dependency to be optional while using @Inject, you must use Java's native Optional<T> wrapper class instead: [1] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html)
+java
+@Inject
+private Optional<MovieCatalog> movieCatalog;
+Use code with caution.
+
+2. @Named (The Standard Alternative to @Component / @Qualifier)
+
+The @Named annotation serves a dual purpose in JSR-330 depending on where it is placed: [1] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html)
+
+Usage A: Component Declaration (Like @Component)
+
+When placed at the class level, it registers the class as a discovered component during classpath scanning. [1] (https://mkyong.com/spring3/spring-3-and-jsr-330-inject-and-named-example/), [2] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html)
+java
+import jakarta.inject.Named;
+
+@Named("mainCatalog") // <-- Replaces Spring's @Component("mainCatalog")
+public class SimpleMovieCatalog implements MovieCatalog { ... }
+Use code with caution.
+• The Limitation: Unlike Spring’s @Component, @Named is not composable. You cannot use @Named as a meta-annotation to build custom stereotype layers (like how Spring uses @Component to create @Service or @Repository). [1] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html)
+
+Usage B: Injection Targeting (Like @Qualifier)
+
+When placed at an injection point, it acts as a literal string qualifier to narrow down candidates. [1] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html)
+java
+@Inject
+@Named("mainCatalog") // <-- Replaces Spring's @Qualifier("mainCatalog")
+private MovieCatalog movieCatalog;
+Use code with caution.
+
+Comparison Summary & Restrictions
+
+When using the JSR-330 standard inside a Spring context, certain features require careful mapping due to spec limitations: [1] (https://docs.spring.io/spring-framework/reference/core/beans/standard-annotations.html)
+
+Spring Annotation	JSR-330 Equivalent	Notes & Restrictions
+@Autowired	@Inject	Lacks a required flag. Use Optional<T>.
+@Component	@Named	Works with component scanning, but isn't structurally composable.
+@Qualifier("id")	@Named("id")	Standard string matching. JSR-330's base @Qualifier is strictly a meta-annotation for custom tags.
+@Scope("singleton")	@Singleton	The native JSR-330 specification defaults to prototype scope. However, Spring overrides this to enforce its default singleton behavior for consistency.
+@Value	None	No standard equivalent exists. You must use Spring's @Value for properties.
+@Lazy	None	No standard equivalent exists. You must use Spring's @Lazy.
+
