@@ -1,0 +1,44 @@
+1. The Core Definitions
+
+• @Bean: Placed over a method to signal that the method instantiates, configures, and initializes an object that should be managed directly by the Spring IoC container. By default, the name of the method becomes the unique ID of the registered bean """, node=133)/>>.
+• @Configuration: Placed over a class to mark it as a primary source of bean definitions. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=The%20@Bean%20annotation%20is%20used,by%20the%20Spring%20IoC%20container.), [2] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=Annotating%20a%20class%20with%20@Configuration,a%20source%20of%20bean%20definitions.)
+java
+@Configuration // This class acts as our configuration center
+public class AppConfig {
+
+    @Bean // This method registers a singleton bean named "myService"
+    public MyServiceImpl myService() {
+        return new MyServiceImpl();
+    }
+}
+Use code with caution.
+
+2. Full Mode vs. Lite Mode (The Inter-Bean Mechanics)
+
+The critical distinction discussed in this chapter is how Spring processes @Bean methods depending on whether or not they sit inside a @Configuration class. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=In%20common%20scenarios%2C%20@Bean%20methods,processed%20in%20a%20%22lite%22%20mode.)
+
+A. Full Mode (Default @Configuration)
+
+When you leave @Configuration on a class, Spring applies runtime enhancement using CGLIB proxying. This allows beans to safely call other @Bean methods in the same class to declare dependencies. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=Furthermore%2C%20@Configuration%20classes%20let%20inter%2Dbean,methods%20in%20the%20same%20class.)
+• How it works: If Method A programmatically calls myService(), Spring's proxy intercepts the call. Instead of running your Java factory method a second time (which would create a duplicate object), it simply retrieves the already-created singleton instance from the container. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=cross%2Dmethod%20references%20therefore%20get%20redirected%20to%20the%20container's%20lifecycle%20management.), [2] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=reusing%20an%20existing%20singleton%20(or,instance%20for%20the%20given%20bean.)
+
+B. Lite Mode (Plain @Component or proxyBeanMethods = false)
+
+If you define @Bean methods inside a regular class (like a @Component), or explicitly turn proxying off via @Configuration(proxyBeanMethods = false), you trigger Lite Mode. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=When%20@Bean%20methods%20are%20declared,processed%20in%20a%20%22lite%22%20mode.)
+• How it works: Spring skips CGLIB subclass generation entirely, which reduces startup overhead and footprint. However, the methods lose their special container management and behave with standard Java semantics. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=As%20a%20consequence%2C%20@Bean%20methods,the%20overhead%20and%20the%20footprint.), [2] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=When%20@Bean%20methods%20are%20declared,call%2C%20creating%20a%20new%20instance)
+• The Rule: You should never call another @Bean method directly while in Lite Mode, because doing so bypasses the container and will initialize a totally separate, unmanaged object every time. Instead, you must declare dependencies as method arguments, allowing Spring to pass them in cleanly through standard autowiring. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=When%20@Bean%20methods%20are%20declared,call%2C%20creating%20a%20new%20instance), [2] (https://docs.spring.io/spring-framework/reference/core/beans/java/basic-concepts.html#:~:text=As%20a%20consequence%2C%20@Bean%20methods,a%20factory%20method%20argument%20instead.)
+java
+// Example of Lite Mode configuration best practice
+@Configuration(proxyBeanMethods = false) 
+public class FastAppConfig {
+
+    @Bean
+    public Engine engine() {
+        return new Engine();
+    }
+
+    @Bean
+    public Car car(Engine engine) { // Pass dependency as an argument instead of calling engine()!
+        return new Car(engine);
+    }
+}
