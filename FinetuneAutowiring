@@ -344,4 +344,56 @@ Priority	Selection Rule
 3. Normal	Standard, regular beans with no special annotations
 4. Lowest (Emergency)	Beans marked @Fallback
 
-Would you like to see how to write a Spring Boot test that dynamically toggles between a primary bean and a fallback bean, or do you want to look at how Generics can be used as qualifiers next?
+--------------------Geneics--------------------
+The documentation explains how Spring can automatically use Java generics (<T>) as a built-in qualifier filter.
+Normally, Java undergoes Type Erasure, meaning generic types like <String> or <Integer> are stripped out during compilation. However, Spring’s IoC container preserves this metadata at runtime for bean definitions. This allows Spring to safely use your generic parameters as an implicit @Qualifier without you ever having to manually type out string labels.
+
+1. The Core Setup
+
+Imagine you define a generic interface for handling data storage:
+java
+public interface Store<T> {
+    // Methods for storing data of type T
+}
+Use code with caution.
+Next, you create two distinct implementations—one handling text strings, and one handling numbers:
+java
+@Component
+public class StringStore implements Store<String> { ... }
+
+@Component
+public class IntegerStore implements Store<Integer> { ... }
+Use code with caution.
+
+2. Implicit Qualification in Action
+
+Without generic qualifying, if you attempted to inject Store into a service, Spring would crash because it would detect two beans implementing the same Store base interface.
+However, because Spring reads the generic type parameter, it maps the injection target intelligently:
+java
+@Component
+public class OrderProcessor {
+
+    @Autowired
+    private Store<String> s1; // Injects the StringStore bean implicitly!
+
+    @Autowired
+    private Store<Integer> s2; // Injects the IntegerStore bean implicitly!
+}
+Use code with caution.
+• How Spring evaluates s1: It looks for a bean that implements Store. It finds two candidates. It then checks the generic signature <String> and filters out the IntegerStore bean entirely, isolating StringStore as the perfect match.
+
+3. Filtering Collections using Generics
+
+This pattern works elegantly when injecting lists, maps, or arrays. The generic parameters act as an exclusive collection filter.
+Imagine you have three or four different stores handling integers (e.g., CachedIntegerStore, DatabaseIntegerStore) alongside your StringStore. If you write:
+java
+@Autowired
+private List<Store<Integer>> integerStores;
+Use code with caution.
+• The Result: Spring will harvest only the beans that implement Store<Integer> and bundle them into the list.
+• The Filter: The StringStore bean will be completely skipped and will not appear in this list, preventing any unintended type casting issues down the line.
+
+Why this is a Best Practice
+
+• Strong Type Safety: You avoid typos since you don't rely on hardcoded text strings (like @Qualifier("stringStore")). If someone renames a class or variable, your injection won't break.
+• Refactoring Friendly: If you change your type signature in the code, the compiler will instantly catch any discrepancies.
