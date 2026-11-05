@@ -188,3 +188,99 @@ The page mentions the AutowireCandidateResolver. This is the component inside Sp
 1. The explicit settings on the bean metadata (autowire-candidate="true/false").
 2. Standard @Qualifier annotations.
 3. Any custom annotations that you registered via CustomAutowireConfigurer. [1] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=The%20autowire%2Dcandidate%20value%20of%20each,element%20%2D%20The%20presence%20of), [2] (https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/custom-autowire-configurer.html#:~:text=The%20presence%20of%20@Qualifier%20annotations,annotations%20registered%20with%20the%20CustomAutowireConfigurer)
+------------------------- Resource ------------------
+The documentation explains how to use the Jakarta EE standard annotation @Resource (jakarta.annotation.Resource) for dependency injection by bean name.
+While @Autowired is fundamentally by-type first (looking for what class matches), @Resource is fundamentally by-name first (looking for a unique bean ID match).
+
+1. Explicit Selection By-Name
+
+The most robust way to use @Resource is to supply a name attribute. Spring goes into its context container and directly retrieves the bean matching that exact ID.
+java
+public class SimpleMovieLister {
+
+    @Resource(name="myMovieFinder") // <-- Target the exact bean named "myMovieFinder"
+    private MovieFinder movieFinder;
+}
+Use code with caution.
+
+2. Implicit Selection (The Default Fallback)
+
+If you omit the name attribute, Spring will automatically deduce the target bean name from the name of the Java variable or the setter method name you applied it to.
+java
+public class SimpleMovieLister {
+
+    @Resource 
+    private MovieFinder movieFinder; // <-- Spring will implicitly look for a bean named "movieFinder"
+}
+Use code with caution.
+
+3. The Resolution Protocol: What if the name doesn't exist?
+
+If you did not provide an explicit name, and Spring cannot find a bean matching the variable's name, it activates a backup resolution protocol:
+1. Search by Variable Name: First, it tries to match the exact field name against your bean IDs.
+2. Fallback to Primary Type: If no name matches, it shifts behaviors to act like @Autowired by searching for a type match, favoring any bean marked @Primary.
+3. Internal Context Resolution: It seamlessly maps built-in structural framework beans if the type matches interfaces like ApplicationContext or BeanFactory.
+java
+public class MovieRecommender {
+    @Resource
+    private CustomerPreferenceDao customerPreferenceDao; // Checks for name "customerPreferenceDao" first, then defaults to type match.
+
+    @Resource
+    private ApplicationContext context; // Automatically resolves the framework context bean based on its type!
+}
+Use code with caution.
+
+4. Structural Restrictions
+
+A key detail mentioned in earlier parts of the documentation context is that @Resource is structurally more limited than @Autowired:
+• Supported targets: @Resource can only be placed directly on fields or single-argument setter methods.
+• Unsupported targets: You cannot use @Resource on class constructors or on methods that require multiple parameters. If you need constructor injection, you must stick with @Autowired.
+
+-------------------------@Value------------------------------
+
+The documentation explains how to use the Jakarta EE standard annotation @Resource (jakarta.annotation.Resource) for dependency injection by bean name.
+While @Autowired is fundamentally by-type first (looking for what class matches), @Resource is fundamentally by-name first (looking for a unique bean ID match).
+
+1. Explicit Selection By-Name
+
+The most robust way to use @Resource is to supply a name attribute. Spring goes into its context container and directly retrieves the bean matching that exact ID.
+java
+public class SimpleMovieLister {
+
+    @Resource(name="myMovieFinder") // <-- Target the exact bean named "myMovieFinder"
+    private MovieFinder movieFinder;
+}
+Use code with caution.
+
+2. Implicit Selection (The Default Fallback)
+
+If you omit the name attribute, Spring will automatically deduce the target bean name from the name of the Java variable or the setter method name you applied it to.
+java
+public class SimpleMovieLister {
+
+    @Resource 
+    private MovieFinder movieFinder; // <-- Spring will implicitly look for a bean named "movieFinder"
+}
+Use code with caution.
+
+3. The Resolution Protocol: What if the name doesn't exist?
+
+If you did not provide an explicit name, and Spring cannot find a bean matching the variable's name, it activates a backup resolution protocol:
+1. Search by Variable Name: First, it tries to match the exact field name against your bean IDs.
+2. Fallback to Primary Type: If no name matches, it shifts behaviors to act like @Autowired by searching for a type match, favoring any bean marked @Primary.
+3. Internal Context Resolution: It seamlessly maps built-in structural framework beans if the type matches interfaces like ApplicationContext or BeanFactory.
+java
+public class MovieRecommender {
+    @Resource
+    private CustomerPreferenceDao customerPreferenceDao; // Checks for name "customerPreferenceDao" first, then defaults to type match.
+
+    @Resource
+    private ApplicationContext context; // Automatically resolves the framework context bean based on its type!
+}
+Use code with caution.
+
+4. Structural Restrictions
+
+A key detail mentioned in earlier parts of the documentation context is that @Resource is structurally more limited than @Autowired:
+• Supported targets: @Resource can only be placed directly on fields or single-argument setter methods.
+• Unsupported targets: You cannot use @Resource on class constructors or on methods that require multiple parameters. If you need constructor injection, you must stick with @Autowired.
