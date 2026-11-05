@@ -271,3 +271,198 @@ Question: Bean A has a @PostConstruct block that invokes a method in Bean B. The
 • Why it happened: When a method is marked with @Async, Spring doesn't just call it; it creates a proxy or routes it through a task executor thread. The main thread is locked initializing Bean A. The async thread tries to execute Bean B's method, but because the context initialization loop is still technically handling the cascading dependency resolution of Bean A/B, the async thread gets trapped waiting for the main thread's startup lock to clear.
 • The Fix: Avoid mixing asynchronous cross-bean calls inside lifecycle methods (@PostConstruct or afterPropertiesSet). Refactor the design so that Bean A triggers Bean B's async method via a startup runner (CommandLineRunner) after the application context is completely refreshed.
 
+Here are the core concepts, senior-level interview questions, and a practical coding reference for Bean Definition Inheritance.
+
+📝 Main Points to Note Down
+
+• Purpose: Bean definition inheritance allows you to share configuration metadata (such as property values, constructor arguments, method overrides, or scopes) between multiple bean configurations to avoid duplication.
+• Separation from Java Inheritance: This mechanism is completely independent of standard Java class inheritance. A child bean definition can inherit from a parent bean definition even if their underlying Java classes have no inheritance relationship.
+• The parent Attribute: A child bean definition specifies its parent metadata source using the parent attribute. The child can selectively override inherited property values, constructor arguments, initialization methods, or destruction methods.
+• Abstract Bean Definitions: By setting the attribute abstract="true", you tell the container that a bean definition is purely a template. The container will not instantiate abstract beans, meaning you can completely omit the class attribute on an abstract parent definition to serve as a pure configuration skeleton.
+• Inherited vs. Non-Inherited Attributes:
+	• Inherited: Bean class (if omitted by child), constructor arguments, property values, method overrides, init/destroy methods, factory beans, and scopes.
+	• Non-Inherited: The abstract flag itself, depends-on, autowire mode, and lazy-init status. These always default to the child's explicit settings.
+
+🧠 Senior-Level Questions & Answers
+
+
+Q: How does Spring's container internally process parent and child bean definitions during startup before instantiation begins?
+
+• Answer: During the initial container parsing phase, Spring reads configuration metadata and registers them as raw BeanDefinition objects in a BeanDefinitionRegistry. When the container prepares to instantiate beans, it performs a consolidation step called Bean Definition Merging.
+• The container resolves the parent hierarchy, copies the configuration parameters from the parent definition, overlays the child bean’s specific overrides or additions, and creates a unified, internal RootBeanDefinition for the child. Instantiation and dependency injection are executed strictly based on this post-merge definition.
+
+Q: What is the architectural benefit of omitting the class attribute entirely from a parent bean definition, and what strict constraint does this place on the container?
+
+• Answer: Omitting the class attribute is a standard design pattern for creating pure, reusable configuration templates (like pre-configuring database connection pool boundaries or baseline messaging settings).
+• When you omit the class attribute, you must explicitly declare abstract="true" on that parent definition. If you do not mark it abstract, the Spring IoC container will attempt to instantiate the parent bean definition during startup using reflection. Because there is no underlying class reference, it will crash instantly with a fatal context bootstrap exception.
+
+Q: If a parent bean definition has an explicit init-method declared, and a child bean definition inherits from it but overrides the configuration to define its own init-method, what does Spring do with the parent's init method?
+
+• Answer: Unlike standard Java class methods where a subclass method can invoke super.init(), Spring’s bean definition metadata hooks are mutually exclusive overrides. If the child configuration defines an explicit init-method, it completely overwrites the parent's init-method setting in the final merged definition.
+• The container will only execute the child’s designated initialization method. If the parent’s initialization logic is still required, the child's Java class method must explicitly invoke that logic via standard Java code inheritance or composition.
+
+💻 Practical Coding Reference: Programmatic Definition Merging
+
+While inheritance was historically configured via XML, modern Spring systems can perform programmatic bean definition inheritance using core framework APIs—often used inside custom infrastructure or framework tools.
+java
+import org.springframework.beans.factory.support.ChildBeanDefinition;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.beans.factory.support.GenericBeanDefinition;
+
+public class ProgrammaticInheritanceDemo {
+
+    public static void main(String[] args) {
+        DefaultListableBeanFactory registry = new DefaultListableBeanFactory();
+
+        // 1. Define a pure, Abstract Parent Template (No class defined)
+        GenericBeanDefinition parentDefinition = new GenericBeanDefinition();
+        parentDefinition.setAbstract(true);
+        parentDefinition.getPropertyValues().add("timeout", "3000");
+        parentDefinition.getPropertyValues().add("retryAttempts", "3");
+        
+        registry.registerBeanDefinition("baseServiceTemplate", parentDefinition);
+
+        // 2. Define a Child Bean Definition that points to the parent template
+        ChildBeanDefinition childDefinition = new ChildBeanDefinition("baseServiceTemplate");
+        childDefinition.setBeanClass(OrderProcessingService.class);
+        // Selectively override an inherited property value
+        childDefinition.getPropertyValues().add("timeout", "5000"); 
+        
+        registry.registerBeanDefinition("orderService", childDefinition);
+
+        // 3. Fetch the bean: Spring merges definitions under the hood into a RootBeanDefinition
+        OrderProcessingService orderService = registry.getBean("orderService", OrderProcessingService.class);
+        
+        System.out.println("Timeout (Overridden): " + orderService.getTimeout()); // Output: 5000
+        System.out.println("Retry Attempts (Inherited): " + orderService.getRetryAttempts()); // Output: 3
+    }
+}
+
+// Simple POJO target class
+class OrderProcessingService {
+    private String timeout;
+    private String retryAttempts;
+
+    public String getTimeout() { return timeout; }
+    public void setTimeout(String timeout) { this.timeout = timeout; }
+
+    public String getRetryAttempts() { return retryAttempts; }
+    public void setRetryAttempts(String retryAttempts) { this.retryAttempts = retryAttempts; }
+}
+
+Here are the core concepts, senior-level interview questions, and practical coding references for Container Extension Points.
+
+📝 Main Points to Note Down
+
+• Core Purpose: Container extension points allow you to hook directly into the Spring lifecycle to modify bean configurations or live bean instances before they enter active application usage.
+• BeanFactoryPostProcessor (BFPP):
+	• Operates on bean configuration metadata.
+	• Executes immediately after all bean definitions are parsed and loaded into the registry, but before any bean instances are instantiated.
+	• Used to read, mutate, or add configuration properties to existing BeanDefinition recipes.
+• BeanPostProcessor (BPP):
+	• Operates on live bean instances created by the factory.
+	• Provides two explicit interceptor hooks: postProcessBeforeInitialization() (runs right before initialization methods) and postProcessAfterInitialization() (runs immediately after initialization methods).
+	• Primarily used for wrapping beans in dynamic runtime proxies (e.g., AOP, transactional interceptors) or evaluating custom class annotations.
+• The Ordering Contracts: Because post-processors manipulate framework infrastructure, their execution sequence must be tightly managed. Spring uses the Ordered and PriorityOrdered interfaces to establish an explicit execution rank among multiple extensions.
+
+🧠 Senior-Level Questions & Answers
+
+
+Q: Compare the structural roles of a BeanFactoryPostProcessor and a BeanPostProcessor. What fatal architectural issue happens if a BeanFactoryPostProcessor directly attempts to fetch a standard bean using beanFactory.getBean()?
+
+• Answer: A BeanFactoryPostProcessor operates strictly on the configuration recipes (BeanDefinition metadata), whereas a BeanPostProcessor manipulates live, instantiated object instances.
+• If a BFPP invokes beanFactory.getBean(), it forces the container to eagerly instantiate that specific target bean and its entire dependency tree before the container's metadata phase is completed. This bypasses critical downstream infrastructure steps—such as property placeholder resolution or the execution of custom BeanPostProcessor setups—resulting in unproxied, raw, or misconfigured beans being permanently cached in the container.
+
+Q: How does Spring internally use a BeanPostProcessor to handle custom proxy generation, such as when implementing aspect-oriented programming (AOP) or declarative transactions (@Transactional)?
+
+• Answer: Spring ships with a specialized BPP called AbstractAutoProxyCreator. During the postProcessAfterInitialization phase, this component evaluates the target bean's class metadata against registered pointcuts or annotations.
+• If a match occurs, instead of returning the raw target object instance to the application registry, the BPP programmatically uses JDK Dynamic Proxies (if the class implements an interface) or CGLIB (if it does not) to create a wrapper proxy subclass. The proxy encapsulates the target instance and injects the cross-cutting advice (like starting/committing a database transaction) around method invocations.
+
+Q: Why must you avoid using standard field injection (@Autowired) directly inside a custom BeanPostProcessor class, and what is the proper engineering pattern to inject dependencies there?
+
+• Answer: A custom BeanPostProcessor must be instantiated by the container as early as possible so it can process other standard beans. If your BPP uses @Autowired to pull in standard services, it triggers premature initialization of those services before the BPP ecosystem itself is fully established.
+• To break this cycle, you should avoid field injection inside post-processors. Instead, either design the post-processor to pull values lazily on-demand using an ObjectProvider<T>, or implement an infrastructure hook like BeanFactoryAware to retrieve dependencies programmatically from the factory context only when a specific interception callback occurs.
+
+💻 Practical Coding Reference: Custom Extension Pipelines
+
+This example demonstrates how to build and register both a custom BeanFactoryPostProcessor (to modify metadata) and a custom BeanPostProcessor (to monitor or proxy instances).
+java
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class ExtensionPointsDemoConfig {
+
+    public static void main(String[] args) {
+        var context = new AnnotationConfigApplicationContext(ExtensionPointsDemoConfig.class);
+        System.out.println("--- Context Fully Bootstrapped ---");
+        
+        CustomTargetService service = context.getBean(CustomTargetService.class);
+        service.executeTask();
+        
+        context.close();
+    }
+
+    // Registering Infrastructure Extensions
+    @Bean
+    public static BeanFactoryPostProcessor metadataModifier() {
+        return new CustomMetadataModifier();
+    }
+
+    @Bean
+    public static BeanPostProcessor instanceInterceptor() {
+        return new CustomInstanceInterceptor();
+    }
+
+    @Bean
+    public CustomTargetService targetService() {
+        return new CustomTargetService();
+    }
+}
+
+// 1. Custom BFPP: Operates on structural recipes before objects exist
+class CustomMetadataModifier implements BeanFactoryPostProcessor {
+    @Override
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+        System.out.println("1. [BFPP] Inspecting and modifying metadata records.");
+        if (beanFactory.containsBeanDefinition("targetService")) {
+            BeanDefinition definition = beanFactory.getBeanDefinition("targetService");
+            // Forcing the target service bean to initialize lazily via metadata manipulation
+            definition.setLazyInit(true);
+        }
+    }
+}
+
+// 2. Custom BPP: Operates on live instances around initialization callbacks
+class CustomInstanceInterceptor implements BeanPostProcessor {
+    @Override
+    public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        if (bean instanceof CustomTargetService) {
+            System.out.println("2. [BPP BeforeInit] Intercepting: " + beanName);
+        }
+        return bean; // Must return the instance (or a modified wrapper)
+    }
+
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        if (bean instanceof CustomTargetService) {
+            System.out.println("3. [BPP AfterInit] Intercepting: " + beanName + ". Ready for wrapping/proxying.");
+        }
+        return bean;
+    }
+}
+
+class CustomTargetService {
+    public void executeTask() {
+        System.out.println("4. [Business Logic] Executing target service workflow.");
+    }
+}
+
+
+
