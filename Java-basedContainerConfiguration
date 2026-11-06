@@ -42,3 +42,467 @@ public class FastAppConfig {
         return new Car(engine);
     }
 }
+
+
+The documentation explains how to use AnnotationConfigApplicationContext, which is Spring’s core class for bootstrapping and building the application container using Java classes instead of traditional XML configuration files.
+It accepts @Configuration classes, plain @Component classes, and JSR-330 annotations (@Named) as entry points to spin up the container.
+
+1. Direct Initialization (Simple Construction)
+
+You can directly pass your configuration class into the constructor of AnnotationConfigApplicationContext. This immediately loads and registers all the @Bean methods declared inside it. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/instantiating-container.html#:~:text=When%20@Configuration%20classes%20are%20provided,also%20registered%20as%20bean%20definitions.)
+java
+public static void main(String[] args) {
+    // Spin up the container directly using the configuration class
+    ApplicationContext ctx = new AnnotationConfigApplicationContext(AppConfig.class); 
+    
+    MyService myService = ctx.getBean(MyService.class);
+    myService.doStuff();
+}
+Use code with caution.
+• Passing Component Classes Directly: You can also pass regular, un-proxied implementation classes straight into the constructor. Spring registers them as beans and automatically processes any internal @Autowired fields they contain. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/instantiating-container.html#:~:text=As%20mentioned%20earlier%2C%20AnnotationConfigApplicationContext%20is,as%20the%20following%20example%20shows), [2] (https://docs.spring.io/spring-framework/reference/core/beans/java/instantiating-container.html#:~:text=When%20@Component%20and%20JSR%2D330%20classes,within%20those%20classes%20where%20necessary.)
+
+2. Programmatic Construction (register())
+
+If you want to construct the container step-by-step (for instance, dynamically loading different configurations based on environment conditions), you can use the no-arg constructor combined with the register(Class<?>...) method.
+• Crucial Rule: When building the container programmatically, you must explicitly invoke refresh() at the end to trigger bean instantiation and dependency injection. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/instantiating-container.html#:~:text=Building%20the%20Container%20Programmatically%20by,AnnotationConfigApplicationContext();%20ctx.register(AppConfig.class%2C%20OtherConfig.class);%20ctx.register(AdditionalConfig.class);%20ctx.refresh)
+For programmatic setup, register() allows adding configuration classes before calling refresh(). Additionally, component scanning can be triggered via scan(String...) to automatically discover and register @Configuration and @Component classes within specified packages. For web applications, Spring provides AnnotationConfigWebApplicationContext as a web-aware alternative to XML-based context loaders.
+
+
+The documentation explains how to customize the names of your beans when declaring them with the @Bean annotation, overriding Spring's default naming convention.
+
+1. The Default Strategy
+
+By default, when you define a bean using a Java method, Spring automatically names the bean after the method itself. [1]
+java
+@Configuration
+public class AppConfig {
+    @Bean
+    public Thing thing() { 
+        return new Thing(); 
+    }
+}
+Use code with caution.
+• Resulting Bean Name: "thing" [1]
+
+2. Overriding the Default Name
+
+If your method name is long, descriptive, or doesn't match what you want to use for dependency injection points, you can pass a custom string directly into the @Bean annotation. [1]
+You can override the default name by passing a value to the name attribute or using the shorthand @Bean("myThing"). [1]
+
+3. Bean Aliasing
+
+A single bean can be assigned multiple names or aliases by passing a String array to the name attribute. This allows the same instance to be referenced under different identifiers across application subsystems. [1]
+
+4. Context-Wide Defaults (Spring 7.0+)
+
+Starting with Spring 7.0, you can customize the naming strategy globally by configuring a ConfigurationBeanNameGenerator at context bootstrap or during component scanning. For example, FullyQualifiedConfigurationBeanNameGenerator assigns fully-qualified names to unnamed @Bean methods to avoid collisions. [1]
+
+To understand how Spring's Java-based configuration works internally under the hood, let's look at the secret magic behind it. The documentation explains this by highlighting the critical difference between a class marked with @Configuration and a plain class marked with @Component.
+Here is the simple, non-technical explanation of how Spring pulls off this wizardry.
+
+1. The Big Illusion: Full Mode vs. Lite Mode
+
+When Spring boots up and scans your classes, it splits them into two modes based on their annotations:
+• Full Mode (Classes with @Configuration): Spring treats these classes as master blueprints. It intercepts your Java code to enforce its container rules (like making sure a bean is only created once).
+• Lite Mode (Plain classes or @Component): Spring treats these as basic factory methods. It lets your Java code run exactly how you wrote it, with no safety nets.
+
+2. How Full Mode Works: The CGLIB Spy (The Secret Magic)
+
+When you write a normal Java class and call a method inside it twice, Java executes that method twice and gives you two different objects.
+java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public Engine engine() {
+        return new Engine(); // "Create a new Engine"
+    }
+
+    @Bean
+    public Car car() {
+        // Programmatic method call inside Java config
+        return new Car(engine()); 
+    }
+}
+Use code with caution.
+If this were normal Java, calling engine() inside car() would execute the engine method a second time, leaving you with two separate Engine objects.
+To prevent this and protect the Singleton pattern, Spring uses a bytecode library called CGLIB.
+1. Subclassing: At startup, Spring intercepts AppConfig and generates a dynamic subclass of it in memory (a "proxy" wrapper class).
+2. Method Interception: When your code calls engine(), the CGLIB proxy intercepts the call. It asks the Spring container: "Hey, do we already have a bean named 'engine' registered?"
+3. The Result: If it already exists, Spring completely skips executing your return new Engine(); code. Instead, it just hands back the existing singleton bean from memory!
+This is why @Configuration classes and their @Bean methods cannot be marked as private or final—because CGLIB needs to be able to extend the class and override the methods at runtime.
+
+3. How Lite Mode Works: Pure Java Semantics
+
+If you put your @Bean methods inside a plain @Component class, or if you explicitly declare @Configuration(proxyBeanMethods = false), you are running in Lite Mode.
+• No CGLIB Wrapper: Spring leaves your class completely alone. No proxy subclass is generated.
+• Standard Java Behavior: If Method A calls Method B programmatically, it acts exactly like normal Java. It will run the code inside Method B again, creating a duplicate, unmanaged instance that Spring doesn't know about.
+
+The Golden Rule of Lite Mode:
+
+Because you don't have the CGLIB safety net in Lite Mode, you must never call a @Bean method directly from another method. Instead, you must pass the dependency as a method parameter so Spring can inject it safely:
+java
+@Component // Lite Mode!
+public class AppConfigLite {
+
+    @Bean
+    public Engine engine() {
+        return new Engine();
+    }
+
+    @Bean
+    public Car car(Engine engine) { // <-- Pass it as an argument!
+        return new Car(engine); // Perfectly safe.
+    }
+}
+Use code with caution.
+
+Why choose one over the other?
+
+• Full Mode (@Configuration) is great for highly interconnected configuration files where you like programmatically linking your beans together.
+• Lite Mode (proxyBeanMethods = false) is faster and has a smaller memory footprint because Spring doesn't have to generate proxy classes at runtime. (This is why modern architectures like GraalVM Native Image and Spring Boot 3+ heavily leverage Lite Mode by default).
+
+The documentation explains how to combine and organize multiple Java configuration classes, allowing you to modularize your setup instead of stuffing all bean definitions into one giant file.
+Here is the simple, non-technical explanation, followed by real-world scenario questions to test your understanding.
+
+The Easy Explanation 🧩
+
+Imagine your application configuration is like building a house. You don't want the plumbing blueprint, electrical layout, and interior design drawn on the exact same piece of paper. You want separate sheets that stitch together.
+Spring provides three main ways to compose and connect these files:
+
+1. The Modular Loader: @Import
+
+Instead of forcing your main() method to load every configuration class explicitly, you can use @Import to link them together.
+• If ConfigB has @Import(ConfigA.class), loading only ConfigB will automatically pull in all the beans defined in ConfigA as well.
+
+2. Cross-File Wiring: Parameter vs. Field Injection
+
+When configuration files split, beans in one file often depend on beans in another. Spring allows you to connect them across files:
+• Parameter Injection (Recommended): You list the external bean as a parameter in your @Bean method. Spring cleanly resolves it.
+• Field/Autowired Injection: You can @Autowired the configuration classes themselves or fields. Warning: Doing this can sometimes cause beans to initialize too early, so parameter injection is preferred.
+
+3. The Bridge: @ImportResource (Java + XML)
+
+If you are working on a legacy app that still uses old Spring XML files, you don't have to rewrite everything. You can place @ImportResource("classpath:old-config.xml") on your Java @Configuration class to instantly load the XML definitions into your Java context.
+
+Scenario-Based Questions (Interview Style)
+
+
+Question 1: The Broken Cross-File Dependency
+
+Scenario: You split your application into DatabaseConfig (which creates a DataSource bean) and SecurityConfig (which creates a UserDetailsService bean). UserDetailsService requires the DataSource to look up users. You run the app by initializing:
+java
+ApplicationContext ctx = new AnnotationConfigApplicationContext(SecurityConfig.class);
+Use code with caution.
+The application crashes with a NoSuchBeanDefinitionException looking for DataSource.
+• Why did it crash, and how do you fix it using an annotation?
+See Answer
+It crashed because you only loaded SecurityConfig into the container. Spring has no idea DatabaseConfig exists. To fix it, add @Import(DatabaseConfig.class) at the top of the SecurityConfig class.
+
+Question 2: The Eager Config Initialization Trap
+
+Scenario: You are code-reviewing a junior developer's configuration class. They wrote the following code to link two configurations:
+java
+@Configuration
+public class PaymentConfig {
+    @Autowired
+    private AccountRepository accountRepository; // Autowiring from RepositoryConfig
+
+    @Bean
+    public PaymentService paymentService() {
+        return new PaymentServiceImpl(accountRepository);
+    }
+}
+Use code with caution.
+You tell them that while this works, it's safer to use parameter-based injection to avoid "unexpected early initialization" bugs.
+• How would you rewrite the paymentService() bean definition using parameter-based injection?
+See Answer
+Remove the class field completely and pass the dependency directly into the method:
+This defers resolution cleanly until Spring actually calls the factory method.
+
+Question 3: The Legacy Enterprise Bridge
+
+Scenario: Your company is migrating a 10-year-old application to Spring Boot. The database infrastructure is defined in a massive, battle-tested dataSource-context.xml file that no one wants to touch. However, you want to write your new business logic using modern @Configuration Java classes.
+• Which annotation do you use to pull the beans from dataSource-context.xml directly into your Java configuration class?
+See Answer
+You use the @ImportResource annotation. For example:
+
+Question 4: The Circular Reference Lifecycle Crash
+
+Scenario: You are working in a modern Spring Boot environment (where circular references are strictly banned by default). A developer creates a @Configuration class and writes a @PostConstruct method that programmatically calls a local @Bean method inside the exact same class. The application crashes on startup with a BeanCurrentlyInCreationException.
+• Why does this happen internally?
+See Answer
+Non-static @Bean methods semantically require a fully initialized configuration class instance to be invoked by the container. By trying to trigger a bean creation inside a @PostConstruct hook of that same config class, you force the class to attempt to use itself before it is fully built, creating an unresolvable circular loop.
+
+
+Here is a comprehensive set of scenario-based questions covering the entire Java-based Container Configuration module we have explored. These questions simulate real-world debugging, architectural choices, and performance trade-offs.
+
+Tier 1: @Bean, @Configuration, Full vs. Lite Mode
+
+
+Question 1: The Accidental Duplicate Bean Bug
+
+Scenario: You are working in a performance-critical application. A developer tries to optimize startup time by declaring proxyBeanMethods = false to run the configuration in Lite Mode. They write the following code:
+java
+@Configuration(proxyBeanMethods = false)
+public class AppConfig {
+
+    @Bean
+    public Engine engine() {
+        return new Engine();
+    }
+
+    @Bean
+    public Car sedan() {
+        return new Car(engine()); 
+    }
+
+    @Bean
+    public Car suv() {
+        return new Car(engine());
+    }
+}
+Use code with caution.
+During a heap dump analysis, you notice that there are three instances of Engine in memory instead of one.
+• Why did this happen, and how do you fix this code while keeping the configuration in Lite Mode?
+See Answer
+Because proxyBeanMethods = false turns off CGLIB proxying, calling engine() acts like plain Java. Every call executes new Engine() again.
+
+Question 2: The private Configuration Crash
+
+Scenario: A developer wants to restrict visibility of a configuration class so it cannot be instantiated or subclassed outside its package. They write the following code:
+java
+@Configuration
+public final class InternalConfig {
+
+    @Bean
+    private EncryptionService encryptionService() {
+        // ...
+    }
+}
+Use code with caution.
+When booting the application, Spring immediately crashes with an initialization exception before it even runs your code.
+• What internal mechanism caused this crash, and what are the specific rules regarding Java modifiers for Full Mode configurations?
+See Answer
+In Full Mode, Spring uses CGLIB proxying to create a dynamic subclass of your configuration class in memory.
+Therefore, Full Mode configuration classes and non-static factory methods must be overridable (not private or final).
+
+Tier 2: AnnotationConfigApplicationContext & Bootstrapping
+
+
+Question 3: The Ghost Bean Mystery
+
+Scenario: You are programmatically building a diagnostic tool using a custom main method. You initialize the container, register your configurations step-by-step, and attempt to fetch a bean:
+java
+public static void main(String[] args) {
+    AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+    ctx.register(AppConfig.class);
+    
+    MyService service = ctx.getBean(MyService.class); // Exception thrown here!
+}
+Use code with caution.
+The application crashes with an IllegalStateException or NoSuchBeanDefinitionException.
+• What critical step did the developer forget when building the container programmatically?
+See Answer
+When using the no-arg constructor and programmatically calling register(), the container does not automatically boot up. You must explicitly call ctx.refresh(); to instruct Spring to process the registered definitions, instantiate singletons, and perform dependency injection.
+
+Question 4: The Interface Visibility Trap
+
+Scenario: You define a bean using its interface as the return type to encourage loose coupling:
+java
+@Configuration
+public class AppConfig {
+    @Bean
+    public PaymentService paymentService() {
+        return new StripePaymentServiceImpl();
+    }
+}
+Use code with caution.
+In another component, a developer tries to autowire the concrete implementation directly: @Autowired private StripePaymentServiceImpl stripeService;. Depending on when this component is initialized relative to the configuration order, this autowiring randomly fails.
+• Why is this type-matching unreliable, and what is the best practice recommended by the documentation?
+See Answer
+Spring's advanced type prediction is limited to the declared return type (PaymentService). The container only learns about the concrete implementation type (StripePaymentServiceImpl) after the singleton bean is fully instantiated. If another component evaluates its injection points before this bean is constructed, type matching fails.
+
+Tier 3: Composing Configurations & Lifecycle
+
+
+Question 5: The Static Factory Post-Processor Deadlock
+
+Scenario: You want to register a PropertySourcesPlaceholderConfigurer bean to strictly validate your properties. You place it inside your main configuration class:
+java
+@Configuration
+public class AppConfig {
+    @Autowired
+    private Environment env;
+
+    @Bean
+    public PropertySourcesPlaceholderConfigurer configurer() {
+        return new PropertySourcesPlaceholderConfigurer();
+    }
+}
+Use code with caution.
+When starting the app, you notice that @Autowired fields on AppConfig are completely ignored and resolve to null.
+• Why did the presence of this specific bean break dependency injection on its own configuration class, and how do you fix it?
+See Answer
+PropertySourcesPlaceholderConfigurer implements BeanFactoryPostProcessor. These infrastructural beans must be initialized very early in the Spring lifecycle (before normal beans are processed). Because it was declared as a regular instance method, Spring had to force-initialize the entire AppConfig instance prematurely, bypassing the AutowiredAnnotationBeanPostProcessor.
+
+Question 6: The Database Server Shutdown Crash
+
+Scenario: You are migrating a legacy Jakarta EE application to Spring's Java configuration. You fetch a managed database resource using a programmatic JNDI lookup:
+java
+@Bean
+public DataSource dataSource() throws NamingException {
+    return (DataSource) new JndiTemplate().lookup("java:comp/env/jdbc/myDS");
+}
+Use code with caution.
+When you stop your application, the application server logs a severe error: DataSource connection pool closed unexpectedly while connections were active.
+• What automatic Spring feature caused this error, and how do you disable it for external resources?
+See Answer
+By default, Spring's Java configuration detects if a bean has a public close() or shutdown() method and automatically enlists it in a destruction callback (inferred mode). For resources managed outside the application (like a JNDI DataSource managed by the app server), this causes a double-destruction bug.
+
+Tier 4: Spring 6.2+ & Advanced Capabilities
+
+
+Question 7: The Background Thread Blocking Trap (Spring 6.2+)
+
+Scenario: To optimize a slow microservice startup, you take advantage of Spring 6.2's asynchronous bootstrap feature. You have a HeavyReportGenerator bean that takes 5 seconds to load, and a ReportController that relies on it:
+java
+@Bean(bootstrap = BACKGROUND)
+public HeavyReportGenerator reportGenerator() {
+    return new HeavyReportGenerator(); // 5-second computation
+}
+
+@Bean
+public ReportController reportController(HeavyReportGenerator rg) {
+    return new ReportController(rg);
+}
+Use code with caution.
+Even after setting this up, your main bootstrap thread still completely freezes for 5 seconds when constructing ReportController.
+• Why did the main thread block, and what architectural pattern must you use in the dependent bean to keep initialization truly concurrent?
+See Answer
+The main bootstrap thread blocks because ReportController declares a standard, non-lazy injection point for HeavyReportGenerator. Spring is forced to stall the main thread until the background thread finishes building that dependency.
+
+Question 8: The Dynamic Scope Proxy Leak
+
+Scenario: You declare a web-scoped object inside a singleton bean:
+java
+@Bean
+@SessionScope
+public UserPreferences userPreferences() {
+    return new UserPreferences();
+}
+
+@Bean
+public DashboardService dashboardService() {
+    DashboardService service = new DashboardService();
+    service.setPreferences(userPreferences()); // Injected into a singleton
+    return service;
+}
+Use code with caution.
+DashboardService is a singleton (created once at startup). UserPreferences changes for every user session.
+• How does Spring ensure that DashboardService accesses the correct user's preferences for each request, rather than getting stuck with the data of whoever logged in first?
+See Answer
+Under the hood, Spring creates a Scoped Proxy (via proxyMode). When userPreferences() is called inside dashboardService(), Spring does not inject a raw data object. Instead, it injects a smart, lightweight proxy object. Every time a method is called on that proxy, it dynamically forwards the request to the current HTTP session context to look up the correct user data.
+
+
+
+The documentation explains how to take an XML-centric approach to managing your application container while still taking advantage of modern Java-based @Configuration classes.
+This is an essential design pattern when you are working on a large, legacy application that has thousands of lines of existing Spring XML configuration. Instead of doing a massive, risky rewrite of your entire codebase into Java configuration, you leave the XML as the primary driver ("the boss") and introduce your new Java @Configuration classes incrementally.
+Spring provides two primary methods to accomplish this:
+
+Method 1: Declaring @Configuration Classes as Plain <bean/> Elements
+
+Because a class annotated with @Configuration is ultimately just another bean in the eyes of Spring, you can register it inside your XML file using standard <bean> syntax.
+
+1. The Java Code
+
+You write a standard configuration class using annotations for internal wiring:
+You can implement this by writing a Java configuration class (such as com.acme.AppConfig) that utilizes annotations like @Autowired and @Bean.
+
+2. The Primary XML File (system-test-config.xml)
+
+In your XML configuration, enable annotation processing via <context:annotation-config/> and register your Java configuration class as a standard bean alongside your infrastructure beans.
+
+3. How You Boot It
+
+Start the application using an XML-based context reader like ClassPathXmlApplicationContext. Spring will parse the XML, process the annotations, and register the Java-defined @Bean methods alongside your XML beans.
+
+Method 2: Using <context:component-scan/> to Autodetect @Configuration Classes
+
+To avoid manually declaring every Java configuration class in XML, you can leverage classpath component scanning. Because @Configuration is meta-annotated with @Component, replacing manual bean entries with <context:component-scan base-package="com.acme"/> implicitly enables annotation processing and automatically discovers and parses your Java configuration classes and inner @Bean methods.
+
+Summary Checklist: Which Direction are you facing?
+
+
+Strategy	Who is "The Boss"?	Entrypoint Annotation / Class	Use Case
+XML-Centric	XML Files	ClassPathXmlApplicationContext	Legacy migration; adding modern Java blocks to a large, pre-existing XML ecosystem.
+Java-Centric	Java Classes	@ImportResource / AnnotationConfigApplicationContext	Modern applications that only need XML for tricky namespaces (like legacy security or integration configurations).
+
+The documentation explains the exact opposite of the previous approach: a Java-centric architecture where a @Configuration class is the absolute master blueprint ("the boss"), but it pulls in external XML files using the @ImportResource annotation.
+This pattern is highly common when you are writing a modern, greenfield Spring application in Java, but you need to use a specific framework or legacy plugin that only provides configuration instructions in an XML format (such as complex Spring Security filters, legacy Enterprise Integration patterns, or third-party vendor configurations).
+
+How It Works: The Master Blueprint
+
+Instead of using an XML file to boot the system, you use a standard Java entry point and instruct it to absorb the XML layout cleanly:
+
+1. The Legacy XML File (classpath:properties-config.xml)
+
+Imagine you have a standalone XML file that configures a database repository or data beans:
+xml
+<beans xmlns="http://springframework.org"
+       xmlns:xsi="http://w3.org"
+       xsi:schemaLocation="http://springframework.org 
+                           https://springframework.org">
+
+    <!-- A bean defined cleanly in XML -->
+    <bean id="accountRepository" class="com.acme.repository.JdbcAccountRepository"/>
+</beans>
+Use code with caution.
+
+2. The Master Java Configuration (AppConfig.class)
+
+You write your standard configuration class and point to the XML path using @ImportResource. This tells Spring: "Build all my Java beans, but go read this XML file and register everything inside it into the exact same container."
+java
+@Configuration
+@ImportResource("classpath:properties-config.xml") // <-- Pulls the XML into Java
+public class AppConfig {
+
+    @Bean
+    public TransferService transferService(AccountRepository accountRepository) {
+        // The accountRepository bean defined in XML is injected right here!
+        return new TransferServiceImpl(accountRepository);
+    }
+}
+Use code with caution.
+
+3. How You Boot It
+
+You initialize the entire container using Java-centric context loaders, totally bypassing XML-based file readers:
+java
+public static void main(String[] args) {
+    // Completely Java-centric startup
+    ApplicationContext ctx = new AnnotationConfigApplicationContext(AppConfig.class);
+    TransferService service = ctx.getBean(TransferService.class);
+}
+Use code with caution.
+
+The Big Advantage: Bidirectional Wiring
+
+When you use @ImportResource, Spring merges the XML definitions and Java definitions into a single, unified pool of beans. This means wiring works both ways perfectly:
+• Java can inject XML beans: As shown in the code above, the Java method parameter AccountRepository seamlessly picks up the bean defined inside the <bean id="accountRepository"> tag.
+• XML can inject Java beans: If an XML bean definition uses a <property name="myService" ref="transferService"/>, it will successfully discover and wire the transferService bean defined via Java's @Bean.
+
+Scenario-Based Interview Question
+
+Scenario: You are migrating an old application. You create a master AppConfig class and add @ImportResource("classpath:legacy-context.xml"). Inside legacy-context.xml, there is a bean defined as <bean id="customerService" class="com.acme.CustomerService"/>.
+In your AppConfig class, a developer wants to use that customer service bean, so they write:
+java
+@Bean
+public DashboardController dashboardController() {
+    return new DashboardController(customerService()); // Compilation Error!
+}
+Use code with caution.
+The compiler throws a major error because customerService() is a regular Java method that doesn't exist inside the AppConfig class code.
+• How do you fix this code to properly inject the XML-defined customerService bean into your Java-defined DashboardController?
+See Answer
+Because the bean lives inside the XML file, it has no native Java method signature you can call programmatically. To fix it, you must use parameter-based injection. Pass it as a method parameter, and Spring will autowire it by name/type from the merged context:
