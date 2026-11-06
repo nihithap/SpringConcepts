@@ -506,3 +506,115 @@ The compiler throws a major error because customerService() is a regular Java me
 • How do you fix this code to properly inject the XML-defined customerService bean into your Java-defined DashboardController?
 See Answer
 Because the bean lives inside the XML file, it has no native Java method signature you can call programmatically. To fix it, you must use parameter-based injection. Pass it as a method parameter, and Spring will autowire it by name/type from the merged context:
+
+
+-----------
+The documentation introduces first-class support for programmatic bean registration in Spring Framework 7 via the BeanRegistrar interface, offering a highly efficient and dynamic alternative to standard @Bean configuration methods. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=As%20of%20Spring%20Framework%207%2C,a%20flexible%20and%20efficient%20way.)
+
+1. The Core Setup
+
+Instead of declaring static @Bean methods, you implement the BeanRegistrar interface. To load your custom registrar into the container lifecycle, you pull it in using the @Import annotation on top of a standard @Configuration class. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=As%20of%20Spring%20Framework%207%2C,provided%20via%20the%20BeanRegistrar%20interface), [2] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=Those%20bean%20registrar%20implementations%20are,Kotlin%20@Configuration%20@Import(MyBeanRegistrar.class)%20class%20MyConfiguration)
+java
+@Configuration
+@Import(MyBeanRegistrar.class) // Hooks up the programmatic registrar
+public class MyConfiguration { }
+Use code with caution.
+
+2. The BeanRegistry and Environment APIs
+
+The register method passes you two crucial objects: BeanRegistry (to programmatically wire and register your beans) and Environment (to check system states, properties, or profiles). [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=The%20bean%20registrar%20implementation%20uses,a%20concise%20and%20flexible%20way.)
+Because it is written in pure Java/Kotlin code, you can use if expressions, for loops, or complex conditions to customize how beans register: [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=For%20example%2C%20it%20allows%20custom,expression%2C%20a%20for%20loop%2C%20etc.)
+java
+public class MyBeanRegistrar implements BeanRegistrar {
+    @Override
+    public void register(BeanRegistry registry, Environment env) {
+        // Simple registration by class type
+        registry.registerBean(MyRepository.class);
+
+        // Advanced registration using a customization specification lambda
+        registry.registerBean("bar", Bar.class, spec -> spec
+            .prototype()
+            .lazyInit()
+            .description("Custom description")
+            .supplier(context -> new Bar(context.bean(Foo.class))) // Resolving dependencies cleanly!
+        );
+
+        // Conditional registration based on active profiles
+        if (env.matchesProfiles("baz")) {
+            registry.registerBean(Baz.class, spec -> spec
+                .supplier(context -> new Baz("Hello World!")));
+        }
+    }
+}
+Use code with caution.
+
+3. Key Benefits
+
+• Conditional Control: You can wrap bean definitions inside native programming logic (if statements, loop arrays) rather than relying exclusively on declarative @Conditional markers. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=allows%20custom%20registration%20through%20an,expression%2C%20a%20for%20loop%2C%20etc.)
+• Ahead-of-Time (AOT) Friendly: This new approach is fully optimized for AOT compilation (GraalVM native images), making application startup incredibly lightweight and fast even when using complex instance suppliers. [1] (https://docs.spring.io/spring-framework/reference/core/beans/java/programmatic-bean-registration.html#:~:text=Bean%20registrars%20are%20supported%20with,when%20instance%20suppliers%20are%20used.)
+
+Here are complex, scenario-based interview and debugging questions designed to test your understanding of Spring 7’s Programmatic Bean Registration in production environments.
+
+Question 1: The Invisible Bean Defect
+
+Scenario: You write a custom BeanRegistrar to dynamically load multi-tenant data repositories at startup. Your registrar class is properly written and contains all the dynamic logic. However, when you boot up the application, you instantly hit a NoSuchBeanDefinitionException the moment a service tries to autowire one of the repositories.
+You inspect your configuration classes:
+java
+@Configuration
+public class MultiTenantConfig {
+    // Your standard @Bean definitions live here
+}
+Use code with caution.
+• What critical architectural step did the developer miss in the configuration class to ensure Spring executes the BeanRegistrar?
+See Answer
+Implementing the BeanRegistrar interface is not enough to alert Spring's component indexer. You must explicitly tie the registrar into the container's parsing cycle by placing an @Import(MyCustomBeanRegistrar.class) annotation directly on a active @Configuration class.
+
+Question 2: The Native Image AOT Supplier Trap
+
+Scenario: You are optimizing an application for a GraalVM Native Image deployment using Spring 7 AOT optimizations. To keep things clean, you use an instance supplier lambda inside your registrar to perform complex bean construction logic:
+java
+registry.registerBean("analyticsService", AnalyticsService.class, spec -> spec
+    .supplier(context -> {
+        // Obtains a raw system value directly bypassing context.bean()
+        String key = System.getenv("API_KEY"); 
+        return new AnalyticsService(key);
+    })
+);
+Use code with caution.
+During standard JVM execution, this works perfectly. However, when compiling the application into a GraalVM native binary, the AOT compilation fails or the bean crashes at runtime, reporting reflection or initialization metadata issues.
+• Why does raw external logic inside an instance supplier break AOT execution, and what is the documentation-compliant way to resolve dependencies inside the registrar's supplier lambda?
+See Answer
+GraalVM AOT compilation requires highly predictable object allocation models to generate static execution paths. Accessing raw environment parameters or unindexed reflections directly inside the lambda bypasses the pre-compiled AOT graph.
+
+Question 3: The Profile-Matching Lifecycle Race
+
+Scenario: You are creating a feature flag system. You want to register a specific PremiumBillingService only if the application matches a profile called production. You write this code inside your registrar:
+java
+public class BillingRegistrar implements BeanRegistrar {
+    @Override
+    public void register(BeanRegistry registry, Environment env) {
+        if (env.matchesProfiles("production")) {
+            registry.registerBean(PremiumBillingService.class);
+        }
+    }
+}
+Use code with caution.
+A junior developer reviews the code and suggests replacing the if check with a class-level @Profile("production") on the BillingRegistrar class itself.
+• Based on the documentation guidelines, why is using type-level conditional annotations on a BeanRegistrar dangerous if the class is discovered via component scanning instead of direct @Import configuration?
+See Answer
+The documentation warns that if a nested or imported component scanner discovers the registrar class independently (rather than through a controlled @Import recursion loop), type-level conditionals on the enclosing scope might not carry over cleanly. Wrapping the evaluation directly inside the code using the Environment API (env.matchesProfiles(...)) guarantees runtime profile checks execute perfectly regardless of how the registrar class was discovered.
+
+Question 4: The Dynamic Microservice Router Crash
+
+Scenario: You are building a highly dynamic API gateway that loops through a list of service endpoints fetched from an external network config and programmatically turns each one into a Spring WebFlux RouterFunction bean at startup. You write a loop using the BeanRegistry API:
+java
+for (String routeName : config.getRouteNames()) {
+    registry.registerBean(routeName, RouterFunction.class, spec -> spec
+        .supplier(context -> buildRouterFor(routeName, context.bean(MyRepository.class)))
+    );
+}
+Use code with caution.
+During startup, you hit a BeanCurrentlyInCreationException or target dependency mismatches.
+• When programmatically creating complex functional objects that rely on other application singletons, how does the BeanRegistrar specification handle dependency lifecycle order relative to classic @Bean definitions?
+See Answer
+BeanRegistrar instances are processed exceptionally early in the application container context cycle to register metadata definitions before singletons are built. If your supplier lambda executes a direct call requiring dependencies (like context.bean(MyRepository.class)), it will cause an early initialization loop if MyRepository is not yet completely ready.
