@@ -178,3 +178,147 @@ public class LoggingAspect{
     log.info("inside LoggingAspect: Method name :{}", methodSignature.getName());
   }
 }
+
+--------------- pointcut ------------------------
+Define where it happens
+it is an expresson that tells spring where to apply your advice  - which methods should be intercepted
+spring supported pointcut designators :
+  execution, within, this , target, args , @target , @args , @within , @annotation
+
+Here are comprehensive reference notes on Spring AOP Pointcut Expressions, specifically breaking down the execution designator syntax, patterns, and behaviors.
+
+Core Execution Pattern Syntax
+
+The execution pointcut designator is the most frequently used aspect matching mechanism. It follows this strict template:
+\(\text{execution}(\underbrace{\text{modifiers-pattern?}}_{\text{Optional}}\quad \underbrace{\text{ret-type-pattern}}_{\text{Required}}\quad \underbrace{\text{declaring-type-pattern?}}_{\text{Optional}}\quad \underbrace{\text{name-pattern(param-pattern)}}_{\text{Required}}\quad \underbrace{\text{throws-pattern?}}_{\text{Optional}})\)
+• ? Denotes Optionals: Modifiers, Declaring Types, and Throws clauses can be omitted entirely.
+
+1. Modifiers Pattern
+
+Restricts method matching based on visibility scopes.
+• public: Matches only public methods.
+• protected: Matches only protected methods.
+• private: Matches only private methods (Note: Spring AOP proxies typically do not intercept private methods, but AspectJ bytecode weaving does).
+• Omitted: Omitting this field defaults to matching any modifier visibility.
+
+2. Return-Type Pattern (ret-type-pattern)
+
+Determines what data types the target method returns.
+• * (Wildcard): Matches any return type (void, primitives, objects).
+• Exact Type: Matches a specific primitive or class (e.g., void, java.lang.String, com.example.dto.UserDTO).
+• + (Subclass Wildcard): Appending + matches the specific type and all its subclasses or implementations.
+	• Example: com.example.dto.BaseDTO+ matches BaseDTO, UserDTO, OrderDTO.
+• Package/Subpackage Modifiers:
+	• .*: Matches any return type explicitly residing within that package level.
+	• ..*: Matches any return type inside that package, its subpackages, or its deep sub-subpackages.
+
+3. Declaring-Type Pattern
+
+Defines the class or package boundary where the target methods exist. This is where package paths are resolved.
+• com.example.demo.UserService: Matches only methods inside the UserService class.
+• com.example.demo.*: Matches methods in any class directly inside the demo package.
+• com.example.demo..*: Matches methods in any class inside demo, its subpackages, or its sub-subpackages.
+
+4. Name Pattern (name-pattern)
+
+Targets the literal name of the method using strings and wildcards.
+• Exact Match: getUserById matches only that specific name.
+• Wildcard (*): Matches any method name.
+• Prefix Pattern (prefix*): Matches methods starting with a specific word (e.g., get* matches getName, getId).
+• Suffix Pattern (*suffix): Matches methods ending with a specific word (e.g., *Save matches userSave, orderSave).
+
+5. Parameter Pattern (param-pattern)
+
+Matches methods based on their method signatures and argument arrays.
+• (): Matches methods that take zero arguments.
+• (..): Matches methods with any number of arguments (zero or more), of any data type.
+• (*): Matches methods with exactly one argument of any type.
+• (*, *): Matches methods with exactly two arguments of any type.
+• (String): Matches methods with exactly one argument of type String. (Fully qualified paths like java.lang.String are preferred).
+• (String, int): Matches methods taking exactly two arguments: a String followed by a primitive int.
+• (String, ..): Matches methods where the first argument is a String, followed by any number (or zero) additional arguments of any type.
+
+Putting It All Together: Cheat Sheet Examples
+
+
+Pointcut Expression	What it Matches
+execution(public * *(..))	Any public method, anywhere, with any return type/arguments.
+execution(* set*(..))	Any method starting with "set" with any return type/arguments.
+execution(* com.example.service.UserService.*(..))	Every method inside the UserService class.
+execution(* com.example.service..*.*(..))	Every method in the service package and all its sub/sub-subpackages.
+execution(com.example.dto.BaseDTO+ *(..))	Any method that returns a BaseDTO or any of its child subclasses.
+execution(* *(java.lang.String, ..))	Any method anywhere whose first argument is a String.
+
+
+Combining Pointcut Expressions
+
+You can chain multiple pointcut patterns together using standard logical operators:
+• && (AND): Both conditions must be met.
+• || (OR): Either condition can be met.
+• ! (NOT): Excludes matching signatures.
+
+1. The @annotation Designator
+
+Targets methods that are marked with a specific custom or framework-level annotation.
+• Match a specific annotation: Matches any method annotated with @LogExecutionTime regardless of its package or return type.java
+@Around("@annotation(com.example.aspect.LogExecutionTime)")
+Use code with caution.
+• Combine Execution and Annotation (&&): Matches only public methods inside the service package AND its subpackages that are marked with @Transactional.java
+execution(public * com.example.service..*.*(..)) && @annotation(org.springframework.transaction.annotation.Transactional)
+Use code with caution.
+
+2. The within Designator
+
+Limits matching to join points within certain types (classes or packages). It acts like a strict filter on the location of the code.
+• Match everything inside a package:java
+within(com.example.controller..)
+Use code with caution.
+• Combine Execution and Within (&&): Matches any method returning a String AND guarantees the class resides strictly inside the web controller layer.java
+execution(String *.*(..)) && within(com.example.web..*)
+Use code with caution.
+
+3. The @within and @target Designators
+
+These filter based on annotations applied at the Class level rather than the method level.
+• @within(AnnotationType): Matches any method inside a class that has the specified annotation.java
+// Matches all methods inside classes annotated with @RestController
+@Before("@within(org.springframework.web.bind.annotation.RestController)")
+Use code with caution.
+• @target(AnnotationType): Matches if the runtime target object has the specified annotation.java
+// Matches methods executed on runtime objects annotated with @Service
+@Around("@target(org.springframework.stereotype.Service)")
+Use code with caution.
+
+4. Advanced Scenarios Using Exclusion (!)
+
+Exclusion is critical for performance to avoid proxying unwanted methods (like boilerplate getters/setters or security configurations).
+• Exclude specific packages: Match everything in the com.example project, EXCEPT classes in the config or security subpackages.java
+within(com.example..*) && !within(com.example.config..) && !within(com.example.security..)
+Use code with caution.
+• Exclude specific method names: Match all methods in the service layer EXCEPT those starting with get or find (read-only methods).java
+execution(* com.example.service..*.*(..)) && !execution(* com.example.service..*.get*(..)) && !execution(* com.example.service..*.find*(..))
+Use code with caution.
+
+5. Reusable @Pointcut Declarations
+
+Instead of writing inline strings everywhere, you can define named pointcuts using empty method declarations. This makes code clean and maintainable.
+java
+@Aspect
+@Component
+public class LoggingAspect {
+
+    // 1. Define the pointcut for all services
+    @Pointcut("within(com.example.service..*)")
+    public void inServiceLayer() {}
+
+    // 2. Define the pointcut for web controllers
+    @Pointcut("execution(public * com.example.web..*.*(..))")
+    public void publicWebMethods() {}
+
+    // 3. Combine them in advice declarations
+    @Around("inServiceLayer() || publicWebMethods()")
+    public Object logPerformance(ProceedingJoinPoint joinPoint) throws Throwable {
+        // Advice logic runs here
+        return joinPoint.proceed();
+    }
+}
