@@ -1,3 +1,7 @@
+why AOp when helper class or inheritance can solve ?
+helper class eliminates code duplication but still have to manually wire beans , call methods everytime
+Inheritance : when we extend soke base class , java can support only single inheritance, this introduces tight coupling.
+
 
 Spring Boot Aspect-Oriented Programming (AOP) Study Notes
 
@@ -85,3 +89,92 @@ When a method is invoked, the client interacts directly with the proxy. The prox
 Spring automatically manages proxy creation using two mechanisms:
 • JDK Dynamic Proxy: Utilised automatically if the target Spring bean implements a standard Java interface. The proxy implements the exact same interface.
 • CGLIB Proxy: Utilised automatically if the target bean does not implement any interface. Spring generates a dynamic subclass of the bean at runtime and overrides its methods to inject the advice.
+
+Available frameworks:
+Spring AOP:
+  Add srping stater AOP dependency in pom.xml
+  1) proxy based mechanism :
+  Spring AOP works using proxies
+  when bean is created, spring wraps it with a proxy
+  JDK Dynamic proxy - for interfaces
+  CGLIB proxy - for classes
+  All metod calls go through the proxy first
+  Proxy:
+  executes advice
+  Then calls the actual method
+  How to configure:
+  Annotation-Based:
+  use @Aspect +@Component (if component is not added it silently fails executing the aspect)
+  Define pointcut expression
+  Add Advice:
+  @Before
+  @After
+  @Around
+  cons:
+  Works only on spring managed beans
+  supports only method execution
+  self-invocation problem
+  Internal method calls bypass proxy -> Advice will not execute on the method , 
+  it will directly call the original object instead of proxy object
+AspectJ:
+  Add aspectjrt , aspectJweaver
+  uses bytecode weaving (not proxies)
+  Aspects are woven into compiled class files directly
+  compile-time , Load-time 
+  pros:
+  no proxy -> no self-invocation prbleam
+  support multiple join points;
+  methods, constrcutos, field access, static initializers
+  works on any java object not just spring beans
+
+
+
+Scenario 1: You remove @Component but define the bean manually
+
+If you remove @Component from your LoggingAspect class and instead define it manually in a configuration class using @Bean, Spring AOP will still work perfectly.
+• Why it works: Spring AOP does not explicitly require @Component. What it actually requires is that the aspect class is registered as a Spring Bean in the Application Context.
+• The Manual Approach:java
+@Configuration
+public class AopConfig {
+    @Bean
+    public LoggingAspect loggingAspect() {
+        return new LoggingAspect();
+    }
+}
+Use code with caution.
+• Behind the scenes: When Spring boots up, it scans the container for any registered bean that has the @Aspect annotation on it. Because your manually created bean still has @Aspect, Spring successfully flags it, processes its pointcuts, and wraps your target services in proxies.
+
+Scenario 2: You remove @Aspect
+
+If you remove @Aspect from the class (even if it is still annotated with @Component or created manually as a bean), Spring AOP will completely stop working for this class.
+• Why it fails: The @Aspect annotation is the absolute trigger that tells Spring's auto-proxy creator (AnnotationAwareAspectJAutoProxyCreator) to process the class for AOP.
+• What happens to the class: Spring will treat the class as a regular, boring Java bean.
+• What happens to the advices (@Before, @Around, etc.): Spring will entirely ignore these annotations inside the class. They will just sit there as dead code.
+• The Result: No proxies will be generated around your service methods, and your logging or security logic will never execute when business methods run.
+
+Summary Checklist
+
+Configuration	Registered as a Bean?	Has @Aspect?	Does AOP Work?
+Standard @Component + @Aspect	Yes (Auto-scanned)	Yes	Yes
+Manual @Bean + @Aspect	Yes (Manual)	Yes	Yes
+@Component only (No @Aspect)	Yes	No	No (Treated as a regular bean)
+@Aspect only (Not registered as a bean)	No	Yes	No (Spring doesn't know it exists)
+
+--------------- joinPoint -----------------
+A joinpoint represents the specific point of execution that your advice is currently intercepting
+eg when your @before Advice fires, it fires at a specific moment -  specific method call . That moment exection - is the joinPoint.
+This joinpoint is a real object that give sthe information abot the method being intercepted :
+what is the method name ?
+what class does it belong to ?
+what arguments were passed to it ?
+
+public class LoggingAspect{
+
+  @Before("execution(public void com....DemoService.displayMessage())")
+  public void beforedisplayMessage(JoinPoint joinPoint){
+    log.info("inside LoggingAspect: beforeDisplayMessage{});
+
+    MethodSignature ms = (MethodSignature) joinPoint.getSignature();
+    log.info("inside LoggingAspect: Method name :{}", methodSignature.getName());
+  }
+}
