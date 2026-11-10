@@ -322,3 +322,29 @@ public class LoggingAspect {
         return joinPoint.proceed();
     }
 }
+
+
+-------------Advice -------------
+@After : to close connect after method execution , after the method execution completes
+ if method throuws exception thn also after get executed
+
+@AfterReturning : to perfom certain action based on the method return value. only when method completes successfully it will work
+AfterThrowing : when method throws expection then this will be executed ,  advice will not work or execute if the method is successful
+
+can we use all advices together ? yes
+
+@pointcut("expression") helps to reuse the pointcut expression
+
+do we need all 4 advices , can we handle all with one advice ? use @Around
+
+@Around uses proceedingjoinpoint
+
+can we create multiple aspect classes ?yes
+ we can combine multiple pointcut using || , &&, ! operators
+--------------------
+AspectJ compile-Time Weaving :
+
+
+
+
+
